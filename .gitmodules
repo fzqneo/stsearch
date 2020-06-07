@@ -1,0 +1,3 @@
+[submodule "rekall"]
+	path = rekall
+	url = https://github.com/scanner-research/rekall.git
