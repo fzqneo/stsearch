@@ -74,14 +74,17 @@ class Slice(Op):
             itvl = self.instream.get()
             if not itvl:
                 return False
-            if self.ind >= 0 and (not self.end or self.ind < self.end) and (self.ind - self.start) % self.step == 0:
-                self.publish(itvl)
-                return True
-            elif self.end is not None and self.ind >= self.end:
-                return False
-            else:
-                pass
-            self.ind += 1
+
+            try:
+                if self.ind >= self.start and (not self.end or self.ind < self.end) and (self.ind - self.start) % self.step == 0:
+                    self.publish(itvl)
+                    return True
+                elif self.end is not None and self.ind >= self.end: # pass send
+                    return False
+                else:   # skip
+                    pass
+            finally:
+                self.ind += 1
 
 class Crop(Op):
     def __init__(self, x1=0., x2=1., y1=0., y2=1.):
@@ -96,9 +99,12 @@ class Crop(Op):
 
     def execute(self):
         ii = self.instream.get()
-        assert isinstance(ii, ImageInterval), f"Expect ImageInterval. Got {type(ii)} "
-        crop_ii = ImageInterval(
-            bounds=Bounds3D(0, 1, self.x1, self.x2, self.y1, self.y2),
-            root=ii)
-        self.publish(crop_ii)
-        return True
+        if ii is not None:
+            assert isinstance(ii, ImageInterval), f"Expect ImageInterval. Got {type(ii)} "
+            crop_ii = ImageInterval(
+                bounds=Bounds3D(ii['t1'], ii['t2'], self.x1, self.x2, self.y1, self.y2),
+                root=ii)
+            self.publish(crop_ii)
+            return True
+        else:
+            return False

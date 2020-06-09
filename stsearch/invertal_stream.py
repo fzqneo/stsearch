@@ -9,6 +9,16 @@ class IntervalStream(object):
         self.children  = list()
         self.q = Queue(maxsize)
         self.closed = False
+    
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        v = self.get()
+        if v is not None:
+            return v
+        else:
+            raise StopIteration
 
     def get(self):
         if self.closed:
