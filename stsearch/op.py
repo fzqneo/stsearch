@@ -2,9 +2,49 @@ from rekall.bounds import *
 
 from stsearch.interval import Interval
 from stsearch.invertal_stream import IntervalStream
-from stsearch.video import *
+
+class Graph(object):
+    """
+    ``Graph`` is used to compose a (sub)-graph using ``Op``s.
+    ``Graph`` has a call() method similar to that of ``Op``, but doesn't have ``execute()``
+    and ``publish()``. It doesn't create its own output stream.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def call(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def __call__(self, *args, **kwargs):
+        # traverse all args, check type, and subscribe to it 
+        for a in list(args) + list(kwargs.values()):
+            assert isinstance(a, IntervalStream), "Should only pass IntervalStream into call()"
+
+        return self.call(*args, **kwargs)
+
 
 class Op(object):
+    """An operator takes one or multiple ``IntervalStream`` as input and outputs one ``IntervalStream``.
+
+    The design of operators is inspired by both data flow systems such as TensorFlow and 
+    relational databases such as PostgreSQL.
+    A subclass of ``Op`` should implement the ``call()`` method and the ``execute()`` method.
+
+    The ``call()`` method is similar to that of Kera's Layer's. It accepts one or multiple ``IntervalStream``
+    as arguments and return an output ``IntervalStream``. This constructs a computation graph, but does not
+    do the actual computation. The method is invoked by the builtin ``__call__()``.
+
+    >>> some_op(op_param1, op_param_2)(input_stream_1, input_stream_2)
+    
+    The ``execute()`` method is called, typically repeatedly, to consume the input streams and publish results 
+    to the output stream. Each call of ``execute()`` has this semantics: if it returns ``True``, it means
+    it has written at least one result to the output stream (maybe more); if it returns ``False``, it means
+    the input streams have been exhausted and no more results will be output. Therefore, a typicall 
+    implementation of an Op's ``execute()`` will keep consuming its input stream(s) until it is abel to
+    produce at least one output or exhausts the input.
+    
+    """
     
     def __init__(self):
         super().__init__()
@@ -14,7 +54,7 @@ class Op(object):
         raise NotImplementedError
 
     def __call__(self, *args, **kwargs):
-        # FIXME how about Op that composes other ops?
+        assert self.output is None, "call() has been called already. We don't support reusing the same Op on a different set of input stream(s) yet"
         # traverse all args, check type, and subscribe to it 
         for a in list(args) + list(kwargs.values()):
             assert isinstance(a, IntervalStream), "Should only pass IntervalStream into call()"
@@ -33,29 +73,6 @@ class Op(object):
         assert self.output is not None, "call() has not been called"
         self.output.put(i)
 
-
-class LocalVideoToFrames(Op):
-    
-    def __init__(self, path):
-        super().__init__()
-        self.decoder = LocalVideoDecoder(path)
-        self.next_frame_id = 0
-
-    def call(self):
-        # not input
-        pass
-
-    def execute(self):
-        next_frame_id = self.next_frame_id
-        if next_frame_id < self.decoder.frame_count:
-            vfi = VideoFrameInterval(
-                bounds=Bounds3D(next_frame_id, next_frame_id+1),
-                root_decoder=self.decoder)
-            self.next_frame_id += 1
-            self.publish(vfi)
-            return True
-        else:
-            return False
 
 class Slice(Op):
 
@@ -86,25 +103,40 @@ class Slice(Op):
             finally:
                 self.ind += 1
 
-class Crop(Op):
-    def __init__(self, x1=0., x2=1., y1=0., y2=1.):
+
+class Map(Op):
+    def __init__(self, map_fn):
         super().__init__()
-        self.x1 = x1
-        self.x2 = x2
-        self.y1 = y1
-        self.y2 = y2
+        self.map_fn = map_fn
 
     def call(self, instream):
         self.instream = instream
 
     def execute(self):
-        ii = self.instream.get()
-        if ii is not None:
-            assert isinstance(ii, ImageInterval), f"Expect ImageInterval. Got {type(ii)} "
-            crop_ii = ImageInterval(
-                bounds=Bounds3D(ii['t1'], ii['t2'], self.x1, self.x2, self.y1, self.y2),
-                root=ii)
-            self.publish(crop_ii)
+        i = self.instream.get()
+        if i is not None:
+            self.publish(self.map_fn(i))
             return True
         else:
             return False
+
+
+class Filter(Op):
+    def __init__(self, pred_fn):
+        super().__init__()
+        self.pred_fn = pred_fn
+
+    def call(self, instream):
+        self.instream = instream
+
+    def execute(self):
+        while True:
+            i = self.instream.get()
+            if i is None:
+                return False
+            elif self.pred_fn(i):
+                self.publish(i)
+                return True
+            else:
+                continue
+
