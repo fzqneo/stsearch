@@ -1,7 +1,10 @@
+import threading
+
+from logzero import logger
 from rekall.bounds import *
 
 from stsearch.interval import Interval
-from stsearch.invertal_stream import IntervalStream
+from stsearch.invertal_stream import IntervalStream, IntervalStreamSubscriber
 
 class Graph(object):
     """
@@ -17,7 +20,7 @@ class Graph(object):
         raise NotImplementedError
 
     def __call__(self, *args, **kwargs):
-        # traverse all args, check type, and subscribe to it 
+        # traverse all args, check type
         for a in list(args) + list(kwargs.values()):
             assert isinstance(a, IntervalStream), "Should only pass IntervalStream into call()"
 
@@ -46,21 +49,28 @@ class Op(object):
     
     """
     
-    def __init__(self):
+    def __init__(self, name=None):
         super().__init__()
+        self._inputs = None
         self.output = None
+        self.name = name if name else self.__class__.__name__
+        self.started = False
 
     def call(self, *args, **kwargs):
         raise NotImplementedError
 
     def __call__(self, *args, **kwargs):
         assert self.output is None, "call() has been called already. We don't support reusing the same Op on a different set of input stream(s) yet"
-        # traverse all args, check type, and subscribe to it 
-        for a in list(args) + list(kwargs.values()):
-            assert isinstance(a, IntervalStream), "Should only pass IntervalStream into call()"
-            a.children.append(self)
+        inputs = list(args) + list(kwargs.values())
+        # traverse all args, check type, and convert them into ``IntervalStreamSubscriber`` of the corresponding ``IntervalStream``
+        for a in inputs:
+            assert isinstance(a, IntervalStream), f"Should only pass IntervalStream into call(), got {type(a)}"
+        self._inputs = inputs
 
-        self.call(*args, **kwargs)
+        args_sub = [a.subscribe() for a in args]
+        kwargs_sub = dict([(k, v.sbuscribe()) for k, v in kwargs.items()])
+
+        self.call(*args_sub, **kwargs_sub)
         # create an output stream
         self.output = IntervalStream(parent=self)
         return self.output
@@ -68,16 +78,34 @@ class Op(object):
     def execute(self):
         raise NotImplementedError
 
+    def loop_execute(self):
+        while self.execute():
+            pass
+        self.publish(None)
+
+    def start_thread(self):
+        if not self.started:
+            t = threading.Thread(target=self.loop_execute, name=f"op-thread-{self.name}", daemon=True)
+            t.start()
+            logger.debug(f"Started operator thread {t.name}")
+            self.started = True
+
+    def start_thread_recursive(self):
+        for istream in self._inputs:
+            istream.parent.start_thread_recursive()
+
+        self.start_thread()
+
     def publish(self, i):
-        assert isinstance(i, Interval)
+        assert i is None or isinstance(i, Interval)
         assert self.output is not None, "call() has not been called"
-        self.output.put(i)
+        self.output.publish(i)
 
 
 class Slice(Op):
 
-    def __init__(self, start=0, end=None, step=1):
-        super().__init__()
+    def __init__(self, start=0, end=None, step=1, name=None):
+        super().__init__(name=name)
         self.start = start
         self.end = end
         self.step = step
@@ -105,8 +133,8 @@ class Slice(Op):
 
 
 class Map(Op):
-    def __init__(self, map_fn):
-        super().__init__()
+    def __init__(self, map_fn, name=None):
+        super().__init__(name=name)
         self.map_fn = map_fn
 
     def call(self, instream):
@@ -122,8 +150,8 @@ class Map(Op):
 
 
 class Filter(Op):
-    def __init__(self, pred_fn):
-        super().__init__()
+    def __init__(self, pred_fn, name=None):
+        super().__init__(name)
         self.pred_fn = pred_fn
 
     def call(self, instream):
