@@ -34,18 +34,20 @@ class Op(object):
     relational databases such as PostgreSQL.
     A subclass of ``Op`` should implement the ``call()`` method and the ``execute()`` method.
 
-    The ``call()`` method is similar to that of Kera's Layer's. It accepts one or multiple ``IntervalStream``
-    as arguments and return an output ``IntervalStream``. This constructs a computation graph, but does not
-    do the actual computation. The method is invoked by the builtin ``__call__()``.
+    The ``call()`` method is similar to that of Kera's Layer's. It accepts one or multiple 
+    ``IntervalStreamSubscriber`` as arguments and return an output ``IntervalStream``. 
+    This constructs a computation graph, but does not do the actual computation. The method is invoked by 
+    the builtin ``__call__()``. Internally, it firstly creates ``IntervalStreamSubscriber``s to the 
+    corresponding ``IntervalStream``s and passes those to ``call()``.
 
-    >>> some_op(op_param1, op_param_2)(input_stream_1, input_stream_2)
+    >>> ouput_stream = some_op(op_param1, op_param_2)(input_stream_1, input_stream_2)
     
     The ``execute()`` method is called, typically repeatedly, to consume the input streams and publish results 
     to the output stream. Each call of ``execute()`` has this semantics: if it returns ``True``, it means
     it has written at least one result to the output stream (maybe more); if it returns ``False``, it means
     the input streams have been exhausted and no more results will be output. Therefore, a typicall 
-    implementation of an Op's ``execute()`` will keep consuming its input stream(s) until it is abel to
-    produce at least one output or exhausts the input.
+    implementation of an Op's ``execute()`` will keep consuming its input stream(s) until it is able to
+    produce at least one output or exhausts the input, and then returns.
     
     """
     

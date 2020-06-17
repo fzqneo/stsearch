@@ -3,6 +3,13 @@ from queue import Queue
 from stsearch.interval import Interval
 
 class IntervalStream(object):
+    """An ``IntervalStream`` is a logical representation of the output from an ``Op``.
+    Because we use a push-based mechanism with possible forks (i.e., the output of an Op
+    is consumed by several other Op), the ``IntervalStream`` class doesn't buffer or queue
+    the data itself, but instead delegate it to the ``IntervalStreamSubscriber`` class.
+    This class provides interfaces for the Op to publish and subscribe (i.e., to create
+    ``IntervalStreamSubscriber`` instances) results.
+    """
     def __init__(self, parent):
         super().__init__()
         self.parent = parent
