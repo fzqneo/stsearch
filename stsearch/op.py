@@ -1,7 +1,7 @@
+import collections
 import threading
 
 from logzero import logger
-from rekall.bounds import *
 
 from stsearch.interval import Interval
 from stsearch.invertal_stream import IntervalStream, IntervalStreamSubscriber
@@ -10,7 +10,7 @@ class Graph(object):
     """
     ``Graph`` is used to compose a (sub)-graph using ``Op``s.
     ``Graph`` has a call() method similar to that of ``Op``, but doesn't have ``execute()``
-    and ``publish()``. It doesn't create its own output stream.
+    and ``publish()``. It doesn't create its own output stream and doesn't have its own thread.
     """
 
     def __init__(self):
@@ -30,17 +30,19 @@ class Graph(object):
 class Op(object):
     """An operator takes one or multiple ``IntervalStream`` as input and outputs one ``IntervalStream``.
 
-    The design of operators is inspired by both data flow systems such as TensorFlow and 
+    The design of ``Op`` is inspired by both data flow systems such as TensorFlow and 
     relational databases such as PostgreSQL.
     A subclass of ``Op`` should implement the ``call()`` method and the ``execute()`` method.
 
     The ``call()`` method is similar to that of Kera's Layer's. It accepts one or multiple 
-    ``IntervalStreamSubscriber`` as arguments and return an output ``IntervalStream``. 
-    This constructs a computation graph, but does not do the actual computation. The method is invoked by 
-    the builtin ``__call__()``. Internally, it firstly creates ``IntervalStreamSubscriber``s to the 
-    corresponding ``IntervalStream``s and passes those to ``call()``.
+    ``IntervalStreamSubscriber`` as arguments, which allows the author to do pre-processing
+    and create references to be used in ``execute()``.
+    The user calls this method indirectly by calling the builtin ``__call__`` method, which accepts
+    one or multiple ``IntervalStream`` and return one ``IntervalStream``.
+    Internally, it firstly creates ``IntervalStreamSubscriber``s to the corresponding ``IntervalStream``s 
+    and passes those to ``call()``; it then creates an output ``IntervalStream`` of this Op.
 
-    >>> ouput_stream = some_op(op_param1, op_param_2)(input_stream_1, input_stream_2)
+    >>> ouput_stream = some_op_class(op_param1, op_param_2)(input_stream_1, input_stream_2)
     
     The ``execute()`` method is called, typically repeatedly, to consume the input streams and publish results 
     to the output stream. Each call of ``execute()`` has this semantics: if it returns ``True``, it means
@@ -50,13 +52,21 @@ class Op(object):
     produce at least one output or exhausts the input, and then returns.
     
     """
+
+    # support a default name
+    _name_counter = collections.Counter()
     
     def __init__(self, name=None):
         super().__init__()
         self._inputs = None
         self.output = None
-        self.name = name if name else self.__class__.__name__
         self.started = False
+
+        if name is not None:
+            self.name = name
+        else:
+            self.name = self.__class__.__name__ + '-' + str(Op._name_counter[self.__class__.__name__])
+            Op._name_counter[self.__class__.__name__] += 1
 
     def call(self, *args, **kwargs):
         raise NotImplementedError
@@ -170,3 +180,20 @@ class Filter(Op):
             else:
                 continue
 
+
+class FromIterable(Op):
+    def __init__(self, iterable_of_intervals, name=None):
+        super().__init__(name)
+        self.iterable_of_intervals = iterable_of_intervals
+        self.iterator = iter(iterable_of_intervals)
+
+    def call(self):
+        pass
+
+    def execute(self):
+        try:
+            i = next(self.iterator)
+            self.publish(i)
+            return True
+        except StopIteration:
+            return False
