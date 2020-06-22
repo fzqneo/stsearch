@@ -6,3 +6,6 @@ class Interval(rekall.Interval):
         assert payload is None or isinstance(payload, dict)
         super().__init__(bounds, payload or dict())
     
+    def copy(self):
+        return Interval(self.bounds.copy(), self.payload)
+

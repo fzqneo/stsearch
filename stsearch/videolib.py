@@ -41,11 +41,11 @@ class ImageInterval(Interval):
         self.payload[RGB_KEY] = np.array(val)
 
     @property
-    def height(self):
+    def rgb_height(self):
         return self.rgb.shape[0]
 
     @property
-    def width(self):
+    def rgb_width(self):
         return self.rgb.shape[1]
 
     @staticmethod

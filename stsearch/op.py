@@ -1,7 +1,9 @@
 import collections
+import functools
+from logzero import logger
 import threading
 
-from logzero import logger
+import rekall
 
 from stsearch.interval import Interval
 from stsearch.invertal_stream import IntervalStream, IntervalStreamSubscriber
@@ -109,7 +111,7 @@ class Op(object):
         self.start_thread()
 
     def publish(self, i):
-        assert i is None or isinstance(i, Interval)
+        assert i is None or isinstance(i, Interval), f"Expect None or Interval. Got {type(i)}"
         assert self.output is not None, "call() has not been called"
         self.output.publish(i)
 
@@ -197,3 +199,76 @@ class FromIterable(Op):
             return True
         except StopIteration:
             return False
+
+
+class SetOp(Op):
+    """This encapsulates Rekall-style operators that work on finite 
+    ``IntervalSet`` rather than streams.
+    Internally, it first buffers all input ``Interval``, creates ``IntervalSet``
+    containing them, and then invokes the passed-in ``setop_fn``. The ``setop_fn``
+    accepts one or multiple ``IntervalSet`` and returns one ``IntervalSet``. 
+    The resulting ``IntervalSet`` is then buffered and published in subsequent
+     ``execute()`` calls.
+
+    Because of its set semantics, the first call to ``execute()`` will block
+    until all upstream Ops have finished. Hence, this Op should not be used on 
+    streams, because they are endless. There can also be unintended memory issues 
+    when the payload of input/output intervals are huge.
+
+    The primary purpose of this Op is provide an easy way to reuse the functions
+    provided by Rekall.
+    """
+
+    def __init__(self, setop_fn, name=None):
+        super().__init__(name)
+        self.setop_fn = setop_fn
+        self.result_buffer = None
+        self.done = False
+
+    def call(self, *args):
+        self.instream_subs = args
+
+    def execute(self):
+        if not self.done:
+            logger.debug(f"Setop {self.name}: gathering input sets")
+            # buffer all input and perform setop
+            intrvl_set_args = [rekall.IntervalSet(list(iter(sub))) for sub in self.instream_subs]
+            logger.debug(f"Setop {self.name}: input set sizes: {list(map(len, intrvl_set_args))}")
+            result_intrvl_set = self.setop_fn(*intrvl_set_args)
+            assert isinstance(result_intrvl_set, rekall.IntervalSet)
+            self.result_buffer = sorted(result_intrvl_set._intrvls)
+            self.done = True
+
+        if len(self.result_buffer) > 0:
+            ret = self.result_buffer.pop(0)
+            # type cast
+            ret = Interval(ret.bounds, ret.payload)
+            self.publish(ret)
+            return True
+        else:
+            return False
+
+
+class SetMap(Graph):
+
+    def __init__(self, map_fn, name=None):
+        super().__init__()
+        self.name = name
+        self.map_fn = map_fn
+
+    def call(self, instream):
+        return SetOp(
+            setop_fn=functools.partial(rekall.IntervalSet.map, map_fn=self.map_fn),
+            name=self.name
+        )(instream)
+
+
+class SetCoalesce(Graph):
+
+    def __init__(self, **kwargs):
+        self.coalesce_kwargs = kwargs
+
+    def call(self, instream):
+        return SetOp(
+            setop_fn=functools.partial(rekall.IntervalSet.coalesce, **self.coalesce_kwargs)
+        )(instream)
