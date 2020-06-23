@@ -1,11 +1,16 @@
+import logging
 import unittest
+
+from logzero import logger
 
 from rekall import Bounds3D
 from rekall.predicates import iou_at_least
 
 from stsearch.interval import *
 from stsearch.op import *
-        
+
+logger.setLevel(logging.INFO)
+
 def create_intrvl_list_3():
     return [ 
         Interval(Bounds3D(0, 1), {'name': 'first'}),
@@ -271,7 +276,25 @@ class TestCoalesce(OpTestCase):
             axis=('t1', 't2'), bounds_merge_op=Bounds3D.span, predicate=iou_at_least(0.8))(
                 FromIterable(input_list)())
         results = run_to_finish(output)
-        print(results)
+        # print(results)
+        self.assertIntervalListEq(results, target, bounds_only=True)
+
+
+    def test_coalesce_iou(self):
+
+        input_list = self.intrvl_list_iou
+
+        target = [
+            Interval(Bounds3D(0, 30, 0., .52, 0., .52), {'msg': 'first person starts.'}),
+            Interval(Bounds3D(10, 25, 0.49, 1., .49, 1.), {'msg': 'second person starts.'}),
+            Interval(Bounds3D(100, 120, 0., .8, .0, .8), {'msg': 'third person starts large.'}),
+        ]
+
+        output = Coalesce(
+            axis=('t1', 't2'), bounds_merge_op=Bounds3D.span, predicate=iou_at_least(0.8))(
+                FromIterable(input_list)())
+        results = run_to_finish(output)
+        # print(results)
         self.assertIntervalListEq(results, target, bounds_only=True)
 
 
@@ -289,7 +312,25 @@ class TestCoalesce(OpTestCase):
             axis=('t1', 't2'), bounds_merge_op=Bounds3D.span, predicate=iou_at_least(0.8))(
                 FromIterable(input_list)())
         results = run_to_finish(output)
-        print(results)
+        # print(results)
+        self.assertIntervalListEq(results, target, bounds_only=True)
+
+
+    def test_coalesce_iou_early_late(self):
+
+        input_list = self.intrvl_list_iou_early_late
+
+        target = [
+            Interval(Bounds3D(0, 11, 0., .52, 0., .52), {'msg': 'first person .'}),
+            Interval(Bounds3D(3, 8, 0.49, 1., .49, 1.), {'msg': 'second person .'}),
+            Interval(Bounds3D(100, 120, 0., .8, .0, .8), {'msg': 'third person starts .'}),
+        ]
+
+        output = Coalesce(
+            axis=('t1', 't2'), bounds_merge_op=Bounds3D.span, predicate=iou_at_least(0.8))(
+                FromIterable(input_list)())
+        results = run_to_finish(output)
+        # print(results)
         self.assertIntervalListEq(results, target, bounds_only=True)
 
     
@@ -307,5 +348,23 @@ class TestCoalesce(OpTestCase):
             axis=('t1', 't2'), bounds_merge_op=Bounds3D.span, predicate=iou_at_least(0.8), epsilon=6)(
                 FromIterable(input_list)())
         results = run_to_finish(output)
-        print(results)
+        # print(results)
+        self.assertIntervalListEq(results, target, bounds_only=True)
+
+
+    def test_coalesce_iou_early_late_epsilon(self):
+
+        input_list = self.intrvl_list_iou_early_late_epsilon
+
+        target = [
+            Interval(Bounds3D(0, 11, 0., .52, 0., .52), {'msg': 'first person .'}),
+            Interval(Bounds3D(3, 8, 0.49, 1., .49, 1.), {'msg': 'second person .'}),
+            Interval(Bounds3D(100, 120, 0., .8, .0, .8), {'msg': 'third person starts .'}),
+        ]
+
+        output = Coalesce(
+            axis=('t1', 't2'), bounds_merge_op=Bounds3D.span, predicate=iou_at_least(0.8), epsilon=6)(
+                FromIterable(input_list)())
+        results = run_to_finish(output)
+        # print(results)
         self.assertIntervalListEq(results, target, bounds_only=True)

@@ -1,9 +1,12 @@
 import collections
 import functools
+import heapq
 from logzero import logger
 import threading
 
 import rekall
+from rekall.bounds import Bounds
+from rekall.predicates import *
 
 from stsearch.interval import Interval
 from stsearch.invertal_stream import IntervalStream, IntervalStreamSubscriber
@@ -272,3 +275,110 @@ class SetCoalesce(Graph):
         return SetOp(
             setop_fn=functools.partial(rekall.IntervalSet.coalesce, **self.coalesce_kwargs)
         )(instream)
+
+
+class Coalesce(Op):
+    """The stream version of coalesce. Due to the streaming nature, pass ``axis=`` anything other
+    than ``('t1', 't2')`` doesn't really make sense.
+
+    """
+
+    def __init__(self, 
+                bounds_merge_op,
+                payload_merge_op=lambda p1, p2: p1,
+                predicate=None,
+                epsilon=0,
+                axis=('t1', 't2'),
+                name=None):
+
+        super().__init__(name)
+        self.bounds_merge_op = bounds_merge_op
+        self.payload_merge_op = payload_merge_op
+        self.predicate = predicate
+        self.epsilon = epsilon
+        self.axis = axis
+
+        self.publishable_coalesced_intrvls = []
+        self.pending_coalesced_intrvls = []
+        self.done = False
+
+    def call(self, instream):
+        self.instream = instream
+
+    def execute(self):
+        while True:
+            if len(self.publishable_coalesced_intrvls) > 0:
+                self.publish(self.publishable_coalesced_intrvls.pop(0))
+                return True
+            elif self.done:
+                return False
+
+            intrvl = self.instream.get()
+            # logger.debug(f"got 1 input: {intrvl}")
+            if intrvl is None:
+                self.publishable_coalesced_intrvls.extend(self.pending_coalesced_intrvls)
+                self.pending_coalesced_intrvls.clear()
+                self.done = True
+                continue
+
+            # logger.debug(f"publishable: {self.publishable_coalesced_intrvls}")
+            # logger.debug(f"pending: {self.pending_coalesced_intrvls}")
+            # logger.debug(f"current: {current_intrvls}")
+
+            bounds_merge_op = self.bounds_merge_op
+            payload_merge_op = self.payload_merge_op
+            predicate = self.predicate
+            epsilon = self.epsilon
+            axis = self.axis
+
+            new_coalesced_intrvls = self.publishable_coalesced_intrvls
+            current_intrvls = self.pending_coalesced_intrvls
+            new_current_intrvls = []
+
+            for cur in current_intrvls:
+                if Bounds.cast({
+			        axis[0] : 't1',
+			        axis[1] : 't2'
+		        })(or_pred(overlaps(),
+                    before(max_dist=epsilon)))(cur, intrvl):
+                        #adds overlapping intervals to new_current_intrvls
+                        new_current_intrvls.append(cur)            
+                else:
+                    #adds all non-overlapping intervals to new_coalesced_intrvls
+                    logger.debug(f"Adding to publishable: {cur}")
+                    new_coalesced_intrvls.append(cur)
+
+            current_intrvls = new_current_intrvls
+            matched_intrvl = None
+            loc = len(current_intrvls) - 1
+
+            #if current_intrvls is empty, we need to start constructing a new set of coalesced intervals
+            if len(current_intrvls) == 0:
+                current_intrvls.append(intrvl.copy())
+                self.publishable_coalesced_intrvls = new_coalesced_intrvls
+                self.pending_coalesced_intrvls = current_intrvls
+                continue
+            
+            if predicate is None:
+                matched_intrvl = current_intrvls[-1]
+            else:
+                for index, cur in enumerate(current_intrvls):
+                    if predicate(cur, intrvl):
+                        matched_intrvl = cur
+                        loc = index
+
+            #if no matching interval is found, this implies that intrvl should be the start of a new coalescing interval
+            if matched_intrvl is None:
+                current_intrvls.append(intrvl)
+            else:
+                current_intrvls[loc] = Interval(
+                        bounds_merge_op(matched_intrvl['bounds'],
+                                        intrvl['bounds']),
+                        payload_merge_op(matched_intrvl['payload'],
+                                        intrvl['payload'])
+                    )
+
+            self.publishable_coalesced_intrvls = new_coalesced_intrvls
+            self.pending_coalesced_intrvls = current_intrvls
+
+
