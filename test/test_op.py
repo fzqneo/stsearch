@@ -1,6 +1,7 @@
 import unittest
 
 from rekall import Bounds3D
+from rekall.predicates import iou_at_least
 
 from stsearch.interval import *
 from stsearch.op import *
@@ -36,14 +37,15 @@ def run_to_finish(ostream):
 
 
 class OpTestCase(unittest.TestCase):
-    def assertIntervalsEq(self, intrvl1, intrvl2):
+    def assertIntervalsEq(self, intrvl1, intrvl2, bounds_only=False):
         self.assertEqual(intrvl1['bounds'].data, intrvl2['bounds'].data)
-        self.assertDictEqual(intrvl1['payload'], intrvl2['payload'])
+        if not bounds_only:
+            self.assertDictEqual(intrvl1['payload'], intrvl2['payload'])
 
-    def assertIntervalListEq(self, ilist1, ilist2):
+    def assertIntervalListEq(self, ilist1, ilist2, bounds_only=False):
         self.assertEqual(len(ilist1), len(ilist2))
         for i, j in zip(ilist1, ilist2):
-            self.assertIntervalsEq(i, j)
+            self.assertIntervalsEq(i, j, bounds_only=bounds_only)
 
 class TestBasicOp(OpTestCase):
 
@@ -105,6 +107,22 @@ class TestBasicOp(OpTestCase):
 
 class TestSetOp(OpTestCase):
 
+    def test_set_map(self):
+        map_fn = lambda intrvl: Interval(
+            intrvl.bounds.copy(),
+            {'msg': intrvl.payload['msg'] + " bravo!"}
+        )
+
+        output = SetMap(map_fn)(FromIterable(create_intrvl_list_hello())())
+        results = run_to_finish(output)
+        self.assertListEqual(
+            [intrvl.payload['msg'] for intrvl in results],
+            ["hello bravo!", "world bravo!", "hello world bravo!"]
+        )
+
+
+class TestCoalesce(OpTestCase):
+
     intrvl_list_no_overlap = [ 
         Interval(Bounds3D(0, 10), {'msg': 'hello'}),
         Interval(Bounds3D(20, 30), {'msg': 'world'}),
@@ -126,19 +144,45 @@ class TestSetOp(OpTestCase):
         Interval(Bounds3D(1999, 2999), {'msg': 'five overlaps with fourth'}),
     ]
 
+    intrvl_list_iou = [
+        Interval(Bounds3D(0, 10, 0., .5, 0., .5), {'msg': 'first person starts. frame 0~10'}),
+        Interval(Bounds3D(10, 20, 0.01, .51, 0.01, .51), {'msg': 'first person stays at frame 10~20'}),
+        Interval(Bounds3D(20, 30, 0.02, .52, 0.02, .52), {'msg': 'first person stays at frame 20~30. Ends'}),
+     
+        Interval(Bounds3D(10, 20, 0.5, 1., .5, 1.), {'msg': 'second person starts. frame 10~20'}),
+        Interval(Bounds3D(20, 25, 0.49, .99, .49, .99), {'msg': 'second person ends. frame 20~25'}),
 
-    def test_set_map(self):
-        map_fn = lambda intrvl: Interval(
-            intrvl.bounds.copy(),
-            {'msg': intrvl.payload['msg'] + " bravo!"}
-        )
+        Interval(Bounds3D(100, 110, 0., .8, .0, .8), {'msg': 'third person starts large. frame 100~110'}),
+        Interval(Bounds3D(110, 120, 0., .79, .0, .79), {'msg': 'third person shrinks. frame 110~120'}),
+    ]
 
-        output = SetMap(map_fn)(FromIterable(create_intrvl_list_hello())())
-        results = run_to_finish(output)
-        self.assertListEqual(
-            [intrvl.payload['msg'] for intrvl in results],
-            ["hello bravo!", "world bravo!", "hello world bravo!"]
-        )
+
+    intrvl_list_iou_early_late = [
+        # second person starts later but ends earlier than first person. Expect correct output order by t1.
+        Interval(Bounds3D(0, 5, 0., .5, 0., .5), {'msg': 'first person starts at frame 0'}),
+        Interval(Bounds3D(5, 10, .01, .51, .01, .51), {'msg': 'first person continues'}),
+        Interval(Bounds3D(10, 11, 0.02, .52, 0.02, .52), {'msg': 'first person ends at frame 10'}),
+     
+        Interval(Bounds3D(3, 4, 0.5, 1., .5, 1.), {'msg': 'second person starts later but ends earlier than first person'}),
+        Interval(Bounds3D(4, 8, 0.49, .99, .49, .99), {'msg': 'second person ends'}),
+
+        Interval(Bounds3D(100, 110, 0., .8, .0, .8), {'msg': 'third person starts large. frame 100~110'}),
+        Interval(Bounds3D(110, 120, 0., .79, .0, .79), {'msg': 'third person shrinks. frame 110~120'}),
+    ]
+
+    
+    intrvl_list_iou_early_late_epsilon = [
+        Interval(Bounds3D(0, 1, 0., .5, 0., .5), {'msg': 'first person starts at frame 0'}),
+        Interval(Bounds3D(5, 6, .01, .51, .01, .51), {'msg': 'first person continues'}),
+        Interval(Bounds3D(10, 11, 0.02, .52, 0.02, .52), {'msg': 'first person ends at frame 10'}),
+     
+        Interval(Bounds3D(3, 4, 0.5, 1., .5, 1.), {'msg': 'second person starts later but ends earlier than first person'}),
+        Interval(Bounds3D(7, 8, 0.49, .99, .49, .99), {'msg': 'second person ends'}),
+
+        Interval(Bounds3D(100, 110, 0., .8, .0, .8), {'msg': 'third person starts large. frame 100~110'}),
+        Interval(Bounds3D(115, 120, 0., .79, .0, .79), {'msg': 'third person shrinks. frame 110~120'}),
+    ]
+
 
     def test_set_coalesce_no_overlap(self):
         output = SetCoalesce(
@@ -198,3 +242,70 @@ class TestSetOp(OpTestCase):
                 Interval(Bounds3D(1000, 2999), L[3].payload), # 3 and 4 merge
             ]
         )
+
+
+    def test_set_coalesce_some_overlap_epsilon_2(self):
+        output = SetCoalesce(
+            axis=('t1', 't2'), bounds_merge_op=Bounds3D.span, epsilon=999)(
+                FromIterable(self.intrvl_list_some_overlap)())
+        results = run_to_finish(output)
+        L = self.intrvl_list_some_overlap
+        self.assertIntervalListEq(
+            results,
+            [
+                Interval(Bounds3D(0, 2999), L[0].payload),    # all should merge
+            ]
+        )
+
+    def test_set_coalesce_iou(self):
+
+        input_list = self.intrvl_list_iou
+
+        target = [
+            Interval(Bounds3D(0, 30, 0., .52, 0., .52), {'msg': 'first person starts.'}),
+            Interval(Bounds3D(10, 25, 0.49, 1., .49, 1.), {'msg': 'second person starts.'}),
+            Interval(Bounds3D(100, 120, 0., .8, .0, .8), {'msg': 'third person starts large.'}),
+        ]
+
+        output = SetCoalesce(
+            axis=('t1', 't2'), bounds_merge_op=Bounds3D.span, predicate=iou_at_least(0.8))(
+                FromIterable(input_list)())
+        results = run_to_finish(output)
+        print(results)
+        self.assertIntervalListEq(results, target, bounds_only=True)
+
+
+    def test_set_coalesce_iou_early_late(self):
+
+        input_list = self.intrvl_list_iou_early_late
+
+        target = [
+            Interval(Bounds3D(0, 11, 0., .52, 0., .52), {'msg': 'first person .'}),
+            Interval(Bounds3D(3, 8, 0.49, 1., .49, 1.), {'msg': 'second person .'}),
+            Interval(Bounds3D(100, 120, 0., .8, .0, .8), {'msg': 'third person starts .'}),
+        ]
+
+        output = SetCoalesce(
+            axis=('t1', 't2'), bounds_merge_op=Bounds3D.span, predicate=iou_at_least(0.8))(
+                FromIterable(input_list)())
+        results = run_to_finish(output)
+        print(results)
+        self.assertIntervalListEq(results, target, bounds_only=True)
+
+    
+    def test_set_coalesce_iou_early_late_epsilon(self):
+
+        input_list = self.intrvl_list_iou_early_late_epsilon
+
+        target = [
+            Interval(Bounds3D(0, 11, 0., .52, 0., .52), {'msg': 'first person .'}),
+            Interval(Bounds3D(3, 8, 0.49, 1., .49, 1.), {'msg': 'second person .'}),
+            Interval(Bounds3D(100, 120, 0., .8, .0, .8), {'msg': 'third person starts .'}),
+        ]
+
+        output = SetCoalesce(
+            axis=('t1', 't2'), bounds_merge_op=Bounds3D.span, predicate=iou_at_least(0.8), epsilon=6)(
+                FromIterable(input_list)())
+        results = run_to_finish(output)
+        print(results)
+        self.assertIntervalListEq(results, target, bounds_only=True)
