@@ -93,7 +93,7 @@ class FrameGroupInterval(Interval):
         self.payload[FRAMEGROUP_KEY] = list(val)
 
     def savevideo(self, path, fps=30,
-                  cv2_videowriter_fourcc=cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
+                  cv2_videowriter_fourcc=cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
                   ):
         H, W = self.frames[0].shape[:2]
         logger.debug(f"VideoWrite fps={fps}, W={W}, H={H}")

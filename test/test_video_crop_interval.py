@@ -17,4 +17,4 @@ if __name__ == "__main__":
 
     for j, fg in enumerate(run_to_finish(framegroups)):
         # print(fg)
-        fg.savevideo(f"output_mp4/video_crop_interval_{j}.avi")
+        fg.savevideo(f"output_mp4/video_crop_interval_{j}.mp4")
