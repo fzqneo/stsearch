@@ -11,6 +11,7 @@ from stsearch.op import *
 
 ROOT_KEY = '_root'  # a root image/frame to generate the current one
 RGB_KEY = '_rgb'    # numpy array (H, W, 3)
+FRAMEGROUP_KEY = '_frames'  # a list of numpy array
 
 class ImageInterval(Interval):
 
@@ -63,6 +64,7 @@ class VideoFrameInterval(ImageInterval):
     def __init__(self, bounds, root_decoder=None):
         super().__init__(bounds, root=None)
         self.root_decoder = root_decoder
+        assert isinstance(root_decoder, AbstractVideoDecoder)
 
     @property
     def rgb(self):
@@ -75,7 +77,43 @@ class VideoFrameInterval(ImageInterval):
         self.payload[RGB_KEY] = np.array(val)
 
 
-class LocalVideoDecoder(object):
+class FrameGroupInterval(Interval):
+
+    def __init__(self, bounds, payload=None):
+        super().__init__(bounds, payload)
+
+    @property
+    def frames(self):
+        assert FRAMEGROUP_KEY in self.payload, ".frames has not been set"
+        return self.payload[FRAMEGROUP_KEY]
+
+    @frames.setter
+    def frames(self, val):
+        assert iter(val)
+        self.payload[FRAMEGROUP_KEY] = list(val)
+
+    def savevideo(self, path, fps=30,
+                  cv2_videowriter_fourcc=cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
+                  ):
+        H, W = self.frames[0].shape[:2]
+        logger.debug(f"VideoWrite fps={fps}, W={W}, H={H}")
+        vw = cv2.VideoWriter(str(path), cv2_videowriter_fourcc, fps, (W,H))
+        for im in self.frames:
+            vw.write(im)
+        vw.release()
+
+
+class AbstractVideoDecoder(object):
+    def __init__(self):
+        self.frame_count = None
+        self.width = None
+        self.height = None
+
+    def get_frame(self, frame_id):
+        raise NotImplementedError
+
+
+class LocalVideoDecoder(AbstractVideoDecoder):
     def __init__(self, path):
         super().__init__()
         self.path = path
@@ -142,6 +180,31 @@ class LocalVideoToFrames(Op):
             return False
 
 
+class LocalVideoCropInterval(Graph):
+    def __init__(self, path, copy_payload=True):
+        self.decoder = LocalVideoDecoder(path)
+        self.copy_payload = copy_payload
+
+    def call(self, instream):
+        def map_fn(intrvl):
+            H, W = self.decoder.height, self.decoder.width
+            if self.copy_payload:
+                fg = FrameGroupInterval(intrvl.bounds.copy(), intrvl.payload)
+            else:
+                fg = FrameGroupInterval(intrvl.bounds.copy())
+            # convert relative coordinate to absolute
+            X1, X2 = int(intrvl['x1'] * W), int(intrvl['x2'] * W)
+            Y1, Y2 = int(intrvl['y1'] * H), int(intrvl['y2'] * H)
+            logger.debug(f"3D cropping: {intrvl['t1'], intrvl['t2'], X1, X2, Y1, Y2}")
+            fg.frames = [
+                self.decoder.get_frame(t1)[Y1:Y2, X1:X2, :]
+                for t1 in range(intrvl['t1'], intrvl['t2'])
+            ]
+            return fg
+
+        return Map(map_fn)(instream)
+
+
 class Crop(Graph):
     def __init__(self, x1=0., x2=1., y1=0., y2=1.):
         super().__init__()
@@ -159,4 +222,3 @@ class Crop(Graph):
             return crop_ii
 
         return Map(map_fn)(instream)
-
