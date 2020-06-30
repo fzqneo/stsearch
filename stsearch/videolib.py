@@ -11,6 +11,7 @@ from stsearch.op import *
 
 ROOT_KEY = '_root'  # a root image/frame to generate the current one
 RGB_KEY = '_rgb'    # numpy array (H, W, 3)
+JPEG_KEY = '_jpeg'
 FRAMEGROUP_KEY = '_frames'  # a list of numpy array
 
 class ImageInterval(Interval):
@@ -28,7 +29,7 @@ class ImageInterval(Interval):
     def rgb(self):
         if RGB_KEY not in self.payload:
             assert self.root, "Trying to make a crop with no root"
-            rH, rW = self.root.height, self.root.width
+            rH, rW = self.root.rgb_height, self.root.rgb_width
             # crop
             self.payload[RGB_KEY] = self.root.rgb[
                 int(rH*self['y1']):int(rH*self['y2']),
@@ -48,6 +49,14 @@ class ImageInterval(Interval):
     @property
     def rgb_width(self):
         return self.rgb.shape[1]
+
+    @property
+    def jpeg(self):
+        if JPEG_KEY not in self.payload:
+            _, jpg_arr = cv2.imencode('.jpg', cv2.cvtColor(self.rgb, cv2.COLOR_RGB2BGR))
+            self.payload[JPEG_KEY] = jpg_arr.tobytes()
+
+        return self.payload[JPEG_KEY]
 
     @staticmethod
     def readfile(path):
@@ -95,6 +104,8 @@ class FrameGroupInterval(Interval):
     def savevideo(self, path, fps=30,
                   cv2_videowriter_fourcc=cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
                   ):
+        # .mp4 and .avi require different fourcc
+        # we only do mp4 for now
         H, W = self.frames[0].shape[:2]
         logger.debug(f"VideoWrite fps={fps}, W={W}, H={H}")
         vw = cv2.VideoWriter(str(path), cv2_videowriter_fourcc, fps, (W,H))
