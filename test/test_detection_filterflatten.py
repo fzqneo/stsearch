@@ -6,7 +6,7 @@ from stsearch.videolib import *
 
 if __name__ == "__main__":
     
-    all_frames = LocalVideoToFrames("VIRAT_S_000200_02_000479_000635.mp4")()
+    all_frames = LocalVideoToFrames("FifthCraig1-2019-02-01-10-05-05.mp4")()
     sampled_frames = Slice(step=300)(all_frames)
     detections = Detection('cloudlet015.elijah.cs.cmu.edu', 5000)(sampled_frames)
     person_detections = DetectionFilterFlatten(['person'], 0.5)(detections)

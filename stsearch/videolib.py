@@ -9,7 +9,7 @@ from stsearch.interval import Interval
 from stsearch.op import *
 
 
-ROOT_KEY = '_root'  # a root image/frame to generate the current one
+# ROOT_KEY = '_root'  # a root image/frame to generate the current one
 RGB_KEY = '_rgb'    # numpy array (H, W, 3)
 JPEG_KEY = '_jpeg'
 FRAMEGROUP_KEY = '_frames'  # a list of numpy array
@@ -18,17 +18,12 @@ class ImageInterval(Interval):
 
     def __init__(self, bounds, root=None):
         super().__init__(bounds)
-        assert root is None or isinstance(root, ImageInterval)
-        self.payload[ROOT_KEY] = root
-
-    @property
-    def root(self):
-        return self.payload[ROOT_KEY]
+        self.root = root or self
 
     @property
     def rgb(self):
         if RGB_KEY not in self.payload:
-            assert self.root, "Trying to make a crop with no root"
+            assert self.root is not self, "Trying to make a crop with no root"
             rH, rW = self.root.rgb_height, self.root.rgb_width
             # crop
             self.payload[RGB_KEY] = self.root.rgb[
@@ -71,7 +66,7 @@ class ImageInterval(Interval):
 class VideoFrameInterval(ImageInterval):
 
     def __init__(self, bounds, root_decoder=None):
-        super().__init__(bounds, root=None)
+        super().__init__(bounds, root=self)
         self.root_decoder = root_decoder
         assert isinstance(root_decoder, AbstractVideoDecoder)
 
