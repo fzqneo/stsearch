@@ -5,7 +5,7 @@ from logzero import logger
 import threading
 
 import rekall
-from rekall.bounds import Bounds
+from rekall.bounds import Bounds, Bounds3D
 from rekall.predicates import *
 
 from stsearch.interval import Interval
@@ -284,16 +284,30 @@ class Coalesce(Op):
     """
 
     def __init__(self, 
-                bounds_merge_op,
+                bounds_merge_op=Bounds3D.span,
                 payload_merge_op=lambda p1, p2: p1,
                 predicate=None,
                 epsilon=0,
                 axis=('t1', 't2'),
+                interval_merge_op=None,
                 name=None):
+        """If ``interval_merge_op`` is not None, ``payload_merge_op`` and ``bounds_merge_op`` will be ignored.
+
+        Args:
+            bounds_merge_op (function): takes two ``Bounds`` objects and returns one ``Bounds`` object
+            payload_merge_op (function, optional): takes to payloads and returns one. Defaults to taking the first payload.
+            predicate ([type], optional): [description]. Defaults to None.
+            epsilon (int, optional): [description]. Defaults to 0.
+            axis (tuple, optional): [description]. Defaults to ('t1', 't2').
+            interval_merge_op ([type], optional): [description]. Defaults to None.
+            name ([type], optional): [description]. Defaults to None.
+        """
 
         super().__init__(name)
         self.bounds_merge_op = bounds_merge_op
         self.payload_merge_op = payload_merge_op
+        self.interval_merge_op = interval_merge_op
+
         self.predicate = predicate
         self.epsilon = epsilon
         self.axis = axis
@@ -307,7 +321,10 @@ class Coalesce(Op):
 
     def execute(self):
         while True:
-            if len(self.publishable_coalesced_intrvls) > 0:
+            if len(self.publishable_coalesced_intrvls) > 0 and \
+                (len(self.pending_coalesced_intrvls) == 0 or \
+                    self.publishable_coalesced_intrvls[0] < self.pending_coalesced_intrvls[0]):
+                # the above condition ensures output t1 increases monotoically. 
                 self.publish(self.publishable_coalesced_intrvls.pop(0))
                 return True
             elif self.done:
@@ -316,7 +333,7 @@ class Coalesce(Op):
             intrvl = self.instream.get()
             # logger.debug(f"got 1 input: {intrvl}")
             if intrvl is None:
-                self.publishable_coalesced_intrvls.extend(self.pending_coalesced_intrvls)
+                self.publishable_coalesced_intrvls = sorted(self.publishable_coalesced_intrvls +  self.pending_coalesced_intrvls)
                 self.pending_coalesced_intrvls.clear()
                 self.done = True
                 continue
@@ -327,6 +344,8 @@ class Coalesce(Op):
 
             bounds_merge_op = self.bounds_merge_op
             payload_merge_op = self.payload_merge_op
+            interval_merge_op = self.interval_merge_op
+
             predicate = self.predicate
             epsilon = self.epsilon
             axis = self.axis
@@ -355,8 +374,8 @@ class Coalesce(Op):
             #if current_intrvls is empty, we need to start constructing a new set of coalesced intervals
             if len(current_intrvls) == 0:
                 current_intrvls.append(intrvl.copy())
-                self.publishable_coalesced_intrvls = new_coalesced_intrvls
-                self.pending_coalesced_intrvls = current_intrvls
+                self.publishable_coalesced_intrvls = sorted(new_coalesced_intrvls)
+                self.pending_coalesced_intrvls = sorted(current_intrvls)
                 continue
             
             if predicate is None:
@@ -371,14 +390,18 @@ class Coalesce(Op):
             if matched_intrvl is None:
                 current_intrvls.append(intrvl)
             else:
-                current_intrvls[loc] = Interval(
-                        bounds_merge_op(matched_intrvl['bounds'],
-                                        intrvl['bounds']),
-                        payload_merge_op(matched_intrvl['payload'],
-                                        intrvl['payload'])
-                    )
+                # merge matched intrvl with the new intrvl
+                if interval_merge_op is not None:
+                    current_intrvls[loc] = interval_merge_op(matched_intrvl, intrvl)
+                else:
+                    current_intrvls[loc] = Interval(
+                            bounds_merge_op(matched_intrvl['bounds'],
+                                            intrvl['bounds']),
+                            payload_merge_op(matched_intrvl['payload'],
+                                            intrvl['payload'])
+                        )
 
-            self.publishable_coalesced_intrvls = new_coalesced_intrvls
-            self.pending_coalesced_intrvls = current_intrvls
+            self.publishable_coalesced_intrvls = sorted(new_coalesced_intrvls)
+            self.pending_coalesced_intrvls = sorted(current_intrvls)
 
 
