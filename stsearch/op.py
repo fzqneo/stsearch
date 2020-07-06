@@ -3,6 +3,7 @@ import functools
 import heapq
 from logzero import logger
 import threading
+import uuid
 
 import rekall
 from rekall.bounds import Bounds, Bounds3D
@@ -340,7 +341,6 @@ class Coalesce(Op):
 
             # logger.debug(f"publishable: {self.publishable_coalesced_intrvls}")
             # logger.debug(f"pending: {self.pending_coalesced_intrvls}")
-            # logger.debug(f"current: {current_intrvls}")
 
             bounds_merge_op = self.bounds_merge_op
             payload_merge_op = self.payload_merge_op
@@ -404,4 +404,73 @@ class Coalesce(Op):
             self.publishable_coalesced_intrvls = sorted(new_coalesced_intrvls)
             self.pending_coalesced_intrvls = sorted(current_intrvls)
 
+
+class CoalesceByLast(Graph):
+    """Similar to ``Coalesce``, but ``predicate`` is applied differretly:
+    For each pending coalesced interval,
+    this op keeps track of the last input interval that was merged.
+    When deciding whether a new input interval should be merged, ``predicate``
+    is applied on the tracked "last" interval and the incoming interval,
+    rather than the whole pending interval and the incoming interval
+    (which ``Coalesce`` does).
+
+    This op is useful for tracking an object that's slowly moving in the scene.
+    If using ``Coalesce``, IoU test will at some point fail because the coalesced
+    interval grows large enough as a result of spanning.
+    """
+    
+    def __init__(self, 
+                bounds_merge_op=Bounds3D.span,
+                payload_merge_op=lambda p1, p2: p1,
+                predicate=None,
+                epsilon=0,
+                axis=('t1', 't2'),
+                interval_merge_op=None):
+
+        super().__init__()
+
+        self.bounds_merge_op = bounds_merge_op
+        self.payload_merge_op = payload_merge_op
+        self.predicate = predicate
+        self.predicate = predicate
+        self.epsilon = epsilon
+        self.axis = axis
+        self.interval_merge_op = interval_merge_op
+
+        # a secret key to track the last interval, should be removed when finish
+        self.key_last = "coalesce_last_" + str(uuid.uuid4())
+
+    def call(self, instream):
+
+        def predicate_1(pending_i, new_i):
+            last_i = pending_i.payload.get(self.key_last, pending_i)
+            return self.predicate(last_i, new_i)
+
+        def interval_merge_op_1(pending_i, new_i):
+            if self.interval_merge_op:
+                merged_i = self.interval_merge_op(pending_i, new_i)
+            else:
+                merged_i = Interval(
+                    self.bounds_merge_op(pending_i.bounds, new_i.bounds),
+                    self.payload_merge_op(pending_i.payload, new_i.payload)
+                )
+            # crucial: track the last merged interval
+            merged_i.payload[self.key_last] = new_i
+            return merged_i
+
+        def remove_key_last(i):
+            try:
+                del i.payload[self.key_last]
+            except KeyError:
+                pass
+            return i
+
+        coalesced_stream = Coalesce(
+            predicate=predicate_1,
+            epsilon=self.epsilon,
+            axis=self.axis,
+            interval_merge_op=interval_merge_op_1
+        )(instream)
+        removed_key_stream = Map(remove_key_last)(coalesced_stream)
+        return removed_key_stream
 
