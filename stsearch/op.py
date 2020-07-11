@@ -3,6 +3,7 @@ import functools
 import heapq
 from logzero import logger
 import threading
+import typing
 import uuid
 
 import rekall
@@ -62,7 +63,7 @@ class Op(object):
     # support a default name
     _name_counter = collections.Counter()
     
-    def __init__(self, name=None):
+    def __init__(self, name: typing.Optional[str] = None):
         super().__init__()
         self._inputs = None
         self.output = None
@@ -74,10 +75,10 @@ class Op(object):
             self.name = self.__class__.__name__ + '-' + str(Op._name_counter[self.__class__.__name__])
             Op._name_counter[self.__class__.__name__] += 1
 
-    def call(self, *args, **kwargs):
+    def call(self, *args: IntervalStreamSubscriber, **kwargs: IntervalStreamSubscriber):
         raise NotImplementedError
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: IntervalStream, **kwargs: IntervalStream) -> IntervalStream:
         assert self.output is None, "call() has been called already. We don't support reusing the same Op on a different set of input stream(s) yet"
         inputs = list(args) + list(kwargs.values())
         # traverse all args, check type, and convert them into ``IntervalStreamSubscriber`` of the corresponding ``IntervalStream``
@@ -93,7 +94,7 @@ class Op(object):
         self.output = IntervalStream(parent=self)
         return self.output
 
-    def execute(self):
+    def execute(self) -> bool:
         raise NotImplementedError
 
     def loop_execute(self):
@@ -114,7 +115,7 @@ class Op(object):
 
         self.start_thread()
 
-    def publish(self, i):
+    def publish(self, i: Interval):
         assert i is None or isinstance(i, Interval), f"Expect None or Interval. Got {type(i)}"
         assert self.output is not None, "call() has not been called"
         self.output.publish(i)
@@ -151,7 +152,7 @@ class Slice(Op):
 
 
 class Map(Op):
-    def __init__(self, map_fn, name=None):
+    def __init__(self, map_fn: typing.Callable[[Interval], Interval], name=None):
         super().__init__(name=name)
         self.map_fn = map_fn
 
@@ -168,7 +169,7 @@ class Map(Op):
 
 
 class Filter(Op):
-    def __init__(self, pred_fn, name=None):
+    def __init__(self, pred_fn: typing.Callable[[Interval], bool], name=None):
         super().__init__(name)
         self.pred_fn = pred_fn
 
@@ -188,7 +189,7 @@ class Filter(Op):
 
 
 class FromIterable(Op):
-    def __init__(self, iterable_of_intervals, name=None):
+    def __init__(self, iterable_of_intervals: typing.Iterable[Interval], name=None):
         super().__init__(name)
         self.iterable_of_intervals = iterable_of_intervals
         self.iterator = iter(iterable_of_intervals)
@@ -206,7 +207,7 @@ class FromIterable(Op):
 
 
 class SetOp(Op):
-    """This encapsulates Rekall-style operators that work on finite 
+    """This encapsulates Rekall-style batch operators that work on finite 
     ``IntervalSet`` rather than streams.
     Internally, it first buffers all input ``Interval``, creates ``IntervalSet``
     containing them, and then invokes the passed-in ``setop_fn``. The ``setop_fn``
@@ -223,7 +224,7 @@ class SetOp(Op):
     provided by Rekall.
     """
 
-    def __init__(self, setop_fn, name=None):
+    def __init__(self, setop_fn: typing.Callable[..., rekall.IntervalSet], name=None):
         super().__init__(name)
         self.setop_fn = setop_fn
         self.result_buffer = None
@@ -285,22 +286,25 @@ class Coalesce(Op):
     """
 
     def __init__(self, 
-                bounds_merge_op=Bounds3D.span,
-                payload_merge_op=lambda p1, p2: p1,
-                predicate=None,
-                epsilon=0,
+                bounds_merge_op: typing.Callable[[Bounds, Bounds], Bounds] = Bounds3D.span,
+                payload_merge_op: typing.Callable[[dict, dict], dict] = lambda p1, p2: p1,
+                predicate: typing.Optional[typing.Callable[[Interval, Interval], bool]] = None,
+                epsilon: float = 0.,
                 axis=('t1', 't2'),
-                interval_merge_op=None,
+                interval_merge_op: typing.Optional[typing.Callable[[Interval, Interval], Interval]] = None,
                 name=None):
         """If ``interval_merge_op`` is not None, ``payload_merge_op`` and ``bounds_merge_op`` will be ignored.
 
         Args:
             bounds_merge_op (function): takes two ``Bounds`` objects and returns one ``Bounds`` object
-            payload_merge_op (function, optional): takes to payloads and returns one. Defaults to taking the first payload.
-            predicate ([type], optional): [description]. Defaults to None.
+            payload_merge_op (function, optional): takes two payloads and returns one. Defaults to taking the first payload.
+            predicate (function, optional): takes two intervals and return Boolean. Defaults to None.
             epsilon (int, optional): [description]. Defaults to 0.
             axis (tuple, optional): [description]. Defaults to ('t1', 't2').
-            interval_merge_op ([type], optional): [description]. Defaults to None.
+            interval_merge_op (function, optional): takes two ``Interval`` objects and returns one. 
+                If not None, it is used to create a merged interval; ``bounds_merge_op`` and ``payload_merge_op`` will be
+                ignored in this case. This is useful, e.g., when the new payload depends on the bounds of the input intervals.
+                Defaults to None.
             name ([type], optional): [description]. Defaults to None.
         """
 
@@ -416,7 +420,8 @@ class CoalesceByLast(Graph):
 
     This op is useful for tracking an object that's slowly moving in the scene.
     If using ``Coalesce``, IoU test will at some point fail because the coalesced
-    interval grows large enough as a result of spanning.
+    interval grows large enough as a result of spanning. By contrast, ``Coalesce``
+    is suitable for mostly static objects.
     """
     
     def __init__(self, 
