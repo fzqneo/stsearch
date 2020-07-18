@@ -224,7 +224,18 @@ class Crop(Graph):
             assert isinstance(ii, ImageInterval), f"Expect ImageInterval. Got {type(ii)} "
             crop_ii = ImageInterval(
                 bounds=rekall.Bounds3D(ii['t1'], ii['t2'], self.x1, self.x2, self.y1, self.y2),
-                root=ii)
+                root=ii.root)
             return crop_ii
 
         return Map(map_fn)(instream)
+
+
+# class VisualizeOnRoot(Graph):
+
+#     def __init__(self):
+#         super().__init__()
+
+#     def call(self, instream):
+#         def map_fn(ii):
+#             assert isinstance(ii, ImageInterval)
+#             new_ii = ImageInterval(ii.bounds.copy())

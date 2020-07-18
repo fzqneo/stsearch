@@ -51,16 +51,6 @@ if __name__ == "__main__":
         predicate=iou_at_least(0.1),
         epsilon=sample_every*3)(person_detections)
 
-    # coalesced_persons = Coalesce(
-    #     bounds_merge_op=Bounds3D.span,
-    #     predicate=iou_at_least(0.05),
-    #     epsilon=sample_every*3)(person_detections)
-
-    # coalesced_persons = coalesce_tail(
-    #     iou_at_least(0.1), 
-    #     # lambda i1, i2: center_l2(i1, i2) < i1.bounds.width(),
-    #     epsilon=sample_every*3)(person_detections)
-
     long_coalesced_persons = Filter(
         pred_fn=lambda intrvl: intrvl.bounds.length() > fps * 3 # 3 seconds
     )(coalesced_persons)
