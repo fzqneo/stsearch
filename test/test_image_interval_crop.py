@@ -1,4 +1,4 @@
-from stsearch.interval import ImageInterval
+from stsearch.videolib import ImageInterval
 from rekall.bounds import Bounds3D
 
 if __name__ == "__main__":
