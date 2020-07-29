@@ -1,7 +1,7 @@
 FROM continuumio/miniconda3:4.8.2
 
 RUN conda install -c conda-forge m2crypto \
-    && pip install  --no-cache-dir opendiamond \
+    && pip install  --no-cache-dir pyyaml opendiamond==10.0.1 \
     && conda clean --all -y
 
 COPY . /root/

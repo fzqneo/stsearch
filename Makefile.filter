@@ -1,0 +1,30 @@
+REGISTRY ?= registry.cmusatyalab.org
+IMAGEID ?= $(REGISTRY)/zf/diamond-public-registry/filter/stsearch
+
+ARTIFACT := diamond-stsearch-filters.tgz
+INSTALLER := $(ARTIFACT).install
+OUTPUTS := $(ARTIFACT) $(INSTALLER)
+
+all: $(OUTPUTS)
+
+$(INSTALLER): $(ARTIFACT)
+	./build-installer.sh $<
+
+$(ARTIFACT): Dockerfile $(wildcard src/*/*.*)
+	docker build --pull -t $(IMAGEID) .
+	docker push $(IMAGEID)
+	docker run --rm $(IMAGEID) extract-filters --set "{'connect_method':'fifo'}" `docker inspect --format='{{ (index .RepoDigests 0) }}' $(IMAGEID)` > $@
+
+freeze:
+	@(if docker pull $(IMAGEID):$(TAG); then echo "THOU SHALT NOT TAG THE SAME TAG TWICE!"; false; fi)
+	chmod +x src/filters/fil_*.py
+	docker build --pull -t $(IMAGEID):$(TAG) .
+	docker push $(IMAGEID):$(TAG)
+	docker run --rm $(IMAGEID):$(TAG) extract-filters --set "{'connect_method':'fifo'}" $(IMAGEID):$(TAG) > $(ARTIFACT:.tgz=-$(TAG).tgz)
+	../build-installer.sh $(ARTIFACT:.tgz=-$(TAG).tgz)
+
+install: $(INSTALLER)
+	./$(INSTALLER)
+
+clean:
+	$(RM) $(OUTPUTS)
