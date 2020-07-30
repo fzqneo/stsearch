@@ -1,7 +1,9 @@
 import pickle
 import os
+import pathlib
 from typing import Iterable
 
+import cv2
 from logzero import logger
 
 from opendiamond.client.search import Blob, DiamondSearch, FilterSpec
@@ -13,7 +15,7 @@ def get_default_code_path(code_file):
 
 OUTPUT_ATTR = 'stsearch-output'
 
-SCRIPT_FILE = "script_1.py"
+SCRIPT_FILE = "script_1st_frame.py"
 SCRIPT_CONTENT = open(SCRIPT_FILE, 'rb').read()
 
 # SCRIPT_CONTENT = """
@@ -35,7 +37,13 @@ if __name__ == "__main__":
     search = DiamondSearch(get_default_scopecookies(), [fil_stsearch_spec,], push_attrs=[OUTPUT_ATTR,])
     search_id = search.start()
     for i, res in enumerate(search.results):
-        print(i, res['_ObjectID'], pickle.loads(res[OUTPUT_ATTR]))
+        object_id = res['_ObjectID'].decode()
+        result = pickle.loads(res[OUTPUT_ATTR])
+        print(i, object_id, type(result))
+        # cv2.imwrite(f"{pathlib.Path(object_id).stem}.jpg", result)
+        with open(f"{pathlib.Path(object_id).stem}.jpg", 'wb') as f:
+            f.write(result)
+
     stats = search.get_stats()
     search.close()
     print(stats)
