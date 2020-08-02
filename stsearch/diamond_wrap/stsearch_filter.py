@@ -29,7 +29,7 @@ class STSearchFilter(Filter):
     def __call__(self, obj):
 
         # save obj to tempfile
-        f = tempfile.NamedTemporaryFile('wb', suffix='.mp4', delete=False)
+        f = tempfile.NamedTemporaryFile('wb', suffix='.mp4', prefix='STSearchFilter', delete=False)
         f.write(obj.data)
         f.close()
 

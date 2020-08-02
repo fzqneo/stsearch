@@ -1,3 +1,5 @@
+import os
+import tempfile
 import threading
 
 import cv2
@@ -108,6 +110,14 @@ class FrameGroupInterval(Interval):
             vw.write(im)
         vw.release()
 
+    def get_mp4(self, *args, **kwargs):
+        f = tempfile.NamedTemporaryFile('wb', suffix='.mp4', prefix='FrameGroupInterval', delete=False)
+        f.close()
+        self.savevideo(f.name)
+        with open(f.name, 'rb') as f2:
+            data = f2.read()
+        os.unlink(f.name)
+        return data
 
 class AbstractVideoDecoder(object):
     def __init__(self):

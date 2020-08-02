@@ -41,7 +41,7 @@ if __name__ == "__main__":
         results = pickle.loads(res[OUTPUT_ATTR])
         print(object_id, len(results))
         for k, (bound, jpeg) in enumerate(results):
-            with open(f"{pathlib.Path(object_id).stem}-{k}.jpg", 'wb') as f:
+            with open(f"{pathlib.Path(object_id).stem}-{k}.mp4", 'wb') as f:
                 f.write(jpeg)
 
     stats = search.get_stats()
