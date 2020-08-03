@@ -12,7 +12,7 @@ def query(path):
     
     all_frames = LocalVideoToFrames(path)()
     sampled_frames = Slice(step=sample_every, end=300)(all_frames)
-    detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
+    detections = Detection(server_list=['cloudlet031.elijah.cs.cmu.edu:5000', 'cloudlet031.elijah.cs.cmu.edu:5001'])(sampled_frames)
     person_detections = DetectionFilterFlatten(['person'], 0.3)(detections)
 
     coalesced_persons = CoalesceByLast(
@@ -26,6 +26,6 @@ def query(path):
     framegrps = LocalVideoCropInterval(path)(long_coalesced_persons)
 
     for _, fg in enumerate(run_to_finish(framegrps)):
-        rv.append((fg.bounds, fg.get_mp4()))
+        rv.append((fg.bounds, fg.get_mp4(), 'mp4'))
 
     return rv

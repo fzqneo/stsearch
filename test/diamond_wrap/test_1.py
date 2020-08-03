@@ -1,7 +1,6 @@
 import pickle
 import os
 import pathlib
-from typing import Iterable
 
 import cv2
 from logzero import logger
@@ -40,9 +39,10 @@ if __name__ == "__main__":
         object_id = res['_ObjectID'].decode()
         results = pickle.loads(res[OUTPUT_ATTR])
         print(object_id, len(results))
-        for k, (bound, jpeg) in enumerate(results):
-            with open(f"{pathlib.Path(object_id).stem}-{k}.mp4", 'wb') as f:
-                f.write(jpeg)
+        for k, (bound, blob, ext) in enumerate(results):
+            print(object_id, k, bound, len(blob), ext)
+            with open(f"{pathlib.Path(object_id).stem}-{k}.{ext}", 'wb') as f:
+                f.write(blob)
 
     stats = search.get_stats()
     search.close()

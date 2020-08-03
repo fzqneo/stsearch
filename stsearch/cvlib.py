@@ -1,5 +1,7 @@
 import io
+import random
 import requests
+from typing import Iterable, Optional
 
 import cv2
 import numpy as np
@@ -16,12 +18,15 @@ class Detection(Graph):
 
     """
 
-    def __init__(self, server='localhost', port=5000, result_key=DEFAULT_DETECTION_KEY):
+    def __init__(
+        self, 
+        server='localhost', port=5000, 
+        server_list: Optional[Iterable[str]]=None,
+        result_key=DEFAULT_DETECTION_KEY):
+
         super().__init__()
 
-        self.server = server
-        self.port = port
-        self.detect_url = 'http://{}:{}/detect'.format(self.server, self.port)
+        self.server_list = list(server_list or [f"{server}:{port}", ])
         self.result_key = result_key
 
 
@@ -30,7 +35,10 @@ class Detection(Graph):
         def map_fn(intrvl):
             assert isinstance(intrvl, ImageInterval)
 
-            r = requests.post(self.detect_url, files={'image': io.BytesIO(intrvl.jpeg)})
+            server = random.choice(self.server_list)
+            detect_url = f"http://{server}/detect"
+
+            r = requests.post(detect_url, files={'image': io.BytesIO(intrvl.jpeg)})
             assert r.ok
             result = r.json()
             if result['success']:
