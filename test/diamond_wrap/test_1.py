@@ -8,6 +8,8 @@ from logzero import logger
 from opendiamond.client.search import Blob, DiamondSearch, FilterSpec
 from opendiamond.client.util import get_default_scopecookies, create_filter_from_files
 
+from stsearch.diamond_wrap.result_pb2 import STSearchResult
+
 def get_default_code_path(code_file):
     code_path = os.path.join(os.environ['HOME'], '.diamond', 'filters', code_file)
     return code_path
@@ -37,10 +39,14 @@ if __name__ == "__main__":
     search_id = search.start()
     for i, res in enumerate(search.results):
         object_id = res['_ObjectID'].decode()
-        results = pickle.loads(res[OUTPUT_ATTR])
-        print(object_id, len(results))
-        for k, (bound, blob, ext) in enumerate(results):
-            print(object_id, k, bound, len(blob), ext)
+
+        filter_result = STSearchResult()
+        filter_result.ParseFromString(res[OUTPUT_ATTR])
+        query_result = pickle.loads(filter_result.query_result)
+        print(f"{object_id}, {filter_result.stats}, {len(query_result)}")
+
+        for k, (bound, blob, ext) in enumerate(query_result):
+            # print(object_id, k, bound, len(blob), ext)
             with open(f"{pathlib.Path(object_id).stem}-{k}.{ext}", 'wb') as f:
                 f.write(blob)
 

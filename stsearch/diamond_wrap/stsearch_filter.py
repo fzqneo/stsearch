@@ -1,9 +1,12 @@
 import os
 import pickle
 import tempfile
+import time
 
 from opendiamond.filter import Filter, Session
 from opendiamond.filter.parameters import StringParameter
+
+from stsearch.diamond_wrap.result_pb2 import STSearchResult
 
 def get_query_fn(blob):
     d = {}
@@ -27,20 +30,39 @@ class STSearchFilter(Filter):
         self.query_fn = query_fn
 
     def __call__(self, obj):
+        # get obj data
+        tic = time.time()
+        _ = obj.data
+        ipc_time = time.time() - tic
 
         # save obj to tempfile
+        tic = time.time()
         f = tempfile.NamedTemporaryFile('wb', suffix='.mp4', prefix='STSearchFilter', delete=False)
         f.write(obj.data)
         f.close()
+        save_time = time.time() - tic
 
         # init and execute query, buffer all results
+        tic = time.time()
         query_result = self.query_fn(f.name)
+        query_time = time.time() - tic
 
         # delete tempfile
         os.unlink(f.name)
 
-        # set results as attribute
-        # Shall we let the user create the attribute binary?
-        # or do we assume it must be a list of Interval?
-        obj.set_binary(self.output_attr, pickle.dumps(query_result))
+        tic = time.time()
+        query_result_serialized = pickle.dumps(query_result)
+        pickle_time = time.time() - tic
+
+        msg = STSearchResult()
+        msg.query_result = query_result_serialized
+        msg.stats.update({
+            'input_size': float(len(obj.data)),
+            'ipc_time': ipc_time,
+            'save_time': save_time,
+            'query_time': query_time,
+            'pickle_time': pickle_time
+        })
+
+        obj.set_binary(self.output_attr, msg.SerializeToString())
         return True

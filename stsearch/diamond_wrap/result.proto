@@ -1,0 +1,6 @@
+syntax = "proto3";
+
+message STSearchResult {
+    bytes query_result = 1;
+    map<string, double> stats = 2;
+}
