@@ -1,3 +1,7 @@
+"""This modules defines classes that conform to `opendiamond.filter.Filter`.
+It intends to provide STSearch functionality in an existing OpenDiamond system.
+"""
+
 import os
 import pickle
 import tempfile
@@ -7,6 +11,7 @@ from opendiamond.filter import Filter, Session
 from opendiamond.filter.parameters import StringParameter
 
 from stsearch.diamond_wrap.result_pb2 import STSearchResult
+
 
 def get_query_fn(blob):
     d = {}
