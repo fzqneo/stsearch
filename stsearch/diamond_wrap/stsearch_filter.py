@@ -49,7 +49,7 @@ class STSearchFilter(Filter):
 
         # init and execute query, buffer all results
         tic = time.time()
-        query_result = self.query_fn(f.name)
+        query_result = self.query_fn(f.name, session=self.session)
         query_time = time.time() - tic
 
         # delete tempfile

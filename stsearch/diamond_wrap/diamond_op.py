@@ -35,7 +35,10 @@ class RGBDiamondSearch(Graph):
         self.session = diamond_session
         self.filterspecs = filterspecs
 
+        self.session.log('error', f"Entering {self.__class__}. filterspecs: {[fs.name for fs in self.filterspecs]}")
+
     def call(self, instream):
+        self.session.log('error', "Entering RGBDiamondSearch.call")
         # pass None as state:SearchState into runner. Operations that calls the state
         # will fail, e.g., update-session-vars, state.context.ensure_resource
         runners = [
@@ -48,12 +51,21 @@ class RGBDiamondSearch(Graph):
         # evaluate with runners
         # pass or drop
         def pred_fn(intrvl: ImageInterval) -> bool:
+            self.session.log('error', f"Entering pred_fn. runners: {[str(r) for r in runners]}")
+
             diamond_obj = opendiamond.server.object_.Object('no-server-id', 'no-url', compute_signature=False)
             diamond_obj[opendiamond.server.object_.ATTR_DATA] = intrvl.jpeg
             diamond_obj['_rgb_image.rgbimage'] = \
                 opendiamond.attributes.RGBImageAttributeCodec().encode(PIL.Image.fromarray(intrvl.rgb))
 
+            for runner in runners:
+                self.session.log('error', f"Evaluating runner: {str(runner)}")
+                result = runner.evaluate(diamond_obj)
+                if not runner.threshold(result):
+                    return False
             return True
+
+        return Filter(pred_fn)(instream)
 
 class _DuckFilter(object):
     """Duck type ``opendiamond.server.filter.Filter`` to provide only
@@ -71,6 +83,8 @@ class _DuckFilter(object):
         self.max_score = filterspec.max_score
 
     def connect(self) -> opendiamond.server.filter._FilterConnection:
+        self.session.log('error', f"Entering _DuckFilter.connect().")
+
         # currently only support Python filters that supports --tcp flag
         C = yaml.full_load(self.filterspec.code.data)
         docker_image = C['docker_image']
@@ -79,6 +93,7 @@ class _DuckFilter(object):
         docker_command = f"{filter_command} --filter --tcp --port {docker_port}"
 
         # 1. Get container handler
+        self.session.log('error', f"Asking to ensure resource {docker_image}, {docker_command}")
         h = self.session.ensure_resource(
             scope='session',
             rtype='docker',
@@ -87,6 +102,7 @@ class _DuckFilter(object):
     
         # 2. create connection to filter
         host, port = h['IPAddress'], docker_port
+        self.session.log('error', f"handler: {h}")
         for _ in range(10):
             try:
                 # OS may give up with its own timeout regardless of timeout here
