@@ -16,7 +16,7 @@ def get_default_code_path(code_file):
 
 OUTPUT_ATTR = 'stsearch-output'
 
-SCRIPT_FILE = "script_1.py"
+SCRIPT_FILE = "script.py"
 SCRIPT_CONTENT = open(SCRIPT_FILE, 'rb').read()
 
 # SCRIPT_CONTENT = """
@@ -31,7 +31,7 @@ if __name__ == "__main__":
     fil_stsearch_spec = FilterSpec(
         name="fil-stsearch",
         code=code_blob,
-        arguments=(OUTPUT_ATTR, ),
+        arguments=(OUTPUT_ATTR, 'script'),
         blob_argument=script_blob
     )
 
