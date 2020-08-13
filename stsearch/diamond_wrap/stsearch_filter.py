@@ -38,8 +38,9 @@ class STSearchFilter(Filter):
             # the zip mode have the side effect of changing cwd of the current processs
             
             # create temp dir and cwd to it
-            self.scriptdir = tempfile.TemporaryDirectory(prefix='stsearch-filter-zip-mode')
+            self.scriptdir = tempfile.TemporaryDirectory(prefix='stsearch-filter-zip-mode-')
             os.chdir(self.scriptdir.name)
+            self.session.log('info', f"Zip mode running at {self.scriptdir.name}")
             
             # extract the blob zip in it
             with zipfile.ZipFile(io.BytesIO(self.blob)) as zf:
@@ -65,7 +66,7 @@ class STSearchFilter(Filter):
 
         # save obj to tempfile
         tic = time.time()
-        f = tempfile.NamedTemporaryFile('wb', suffix='.mp4', prefix='STSearchFilter', delete=False)
+        f = tempfile.NamedTemporaryFile('wb', suffix='.mp4', prefix='STSearchFilter-', delete=False)
         f.write(obj.data)
         f.close()
         save_time = time.time() - tic

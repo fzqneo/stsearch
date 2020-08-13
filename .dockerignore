@@ -1,3 +1,4 @@
+example/*
 rekall/*
 test/*
 !test/*.py

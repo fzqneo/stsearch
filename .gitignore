@@ -1,3 +1,9 @@
+# custome stuff
+diamond-*-filters.tgz
+diamond-*-filters.tgz.install
+.vscode/
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
