@@ -9,7 +9,7 @@ if __name__ == "__main__":
           author_email='zf@cs.cmu.edu',
           license='Apache 2.0',
           packages=['stsearch', 'stsearch.diamond_wrap'],
-          install_requires=['rekallpy', 'logzero', 'numpy', 'opencv-python', 'python-constraint', 'tqdm', 'cloudpickle',
+          install_requires=['rekallpy==0.3.2', 'logzero', 'numpy', 'opencv-python', 'python-constraint', 'tqdm', 'cloudpickle',
                             'urllib3', 'requests'],
           setup_requires=['pytest-runner'],
           tests_require=['pytest'],

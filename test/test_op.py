@@ -45,6 +45,7 @@ class OpTestCase(unittest.TestCase):
     def assertIntervalsEq(self, intrvl1, intrvl2, bounds_only=False):
         self.assertEqual(intrvl1['bounds'].data, intrvl2['bounds'].data)
         if not bounds_only:
+            # only works for single-level dict with primitive value types
             self.assertDictEqual(intrvl1['payload'], intrvl2['payload'])
 
     def assertIntervalListEq(self, ilist1, ilist2, bounds_only=False):
@@ -368,3 +369,66 @@ class TestCoalesce(OpTestCase):
         results = run_to_finish(output)
         # print(results)
         self.assertIntervalListEq(results, target, bounds_only=True)
+
+
+        
+class TestFold(OpTestCase):
+
+    intrvl_list_number = [
+        Interval(Bounds3D(0, 10), {'number': 2}),
+        Interval(Bounds3D(20, 30), {'number': 10}),
+        Interval(Bounds3D(40, 50), {'number': 20}),
+        Interval(Bounds3D(100, 200), {'number': 100}),
+    ]
+
+    def test_fold_number_max(self):
+        input_list = self.intrvl_list_number
+
+        target = [
+            Interval(Bounds3D(0, 0), {'number': 100}),
+        ]
+
+        output = Fold(
+            update_fn=lambda state, intrvl: max(state, intrvl.payload['number']),
+            init_state=0.,
+            finalize_fn=lambda state: Interval(Bounds3D(0, 0), {'number': state}),
+        )(FromIterable(input_list)())
+
+        results = run_to_finish(output)
+        self.assertIntervalListEq(results, target)
+
+
+    def test_fold_number_min(self):
+        input_list = self.intrvl_list_number
+
+        target = [
+            Interval(Bounds3D(0, 0), {'number': 2}),
+        ]
+
+        output = Fold(
+            update_fn=lambda state, intrvl: min(state, intrvl.payload['number']),
+            init_state=float('inf'),
+            finalize_fn=lambda state: Interval(Bounds3D(0, 0), {'number': state}),
+        )(FromIterable(input_list)())
+
+        results = run_to_finish(output)
+        self.assertIntervalListEq(results, target)
+
+
+    def test_fold_number_avg(self):
+        input_list = self.intrvl_list_number
+
+        target = [
+            Interval(Bounds3D(0, 0), {'number': 33}),
+        ]
+
+        # state = (count, sum)
+        output = Fold(
+            update_fn=lambda state, intrvl: (state[0]+1, state[1]+intrvl.payload['number']),
+            init_state=(0, 0.),
+            finalize_fn=lambda state: Interval(Bounds3D(0, 0), {'number': state[1]/state[0]}),
+        )(FromIterable(input_list)())
+
+        results = run_to_finish(output)
+        self.assertIntervalListEq(results, target)
+

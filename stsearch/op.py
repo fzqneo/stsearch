@@ -479,3 +479,52 @@ class CoalesceByLast(Graph):
         removed_key_stream = Map(remove_key_last)(coalesced_stream)
         return removed_key_stream
 
+
+class Fold(Op):
+
+    def __init__(
+        self,
+        update_fn: typing.Callable[[typing.Any, Interval], typing.Any],
+        init_state: typing.Any = None,
+        finalize_fn: typing.Callable[[typing.Any], Interval] = lambda x: x,
+        name = None
+    ):
+        """Folds a finite interval stream into a single output interval.
+        Similar to Rekall's ``fold`` or DBMS's aggregate.
+
+        Args:
+            update_fn (typing.Callable[[typing.Any, Interval], typing.Any]): Update the internal state using a new interval. Return the new state.
+            init_state (typing.Any, optional): Init state. If None, will use the first interval as state. Defaults to None.
+            finalize_fn (typing.Callable[[typing.Any], Interval], optional): Convert the final state into an interval. Defaults to the identify function.
+            name ([type], optional): [description]. Defaults to None.
+        """
+        super().__init__(name)
+        self.update_fn = update_fn
+        self.init_state = init_state
+        self.finalize_fn = finalize_fn
+
+        self.done = False
+
+    def call(self, instream):
+        self.instream = instream
+
+    def execute(self) -> bool:
+        if self.done:
+            return False
+
+        state = self.init_state
+        while True:
+            intrvl = self.instream.get()
+            if intrvl is None:
+                break   # Done
+            elif state is None:   # no user provided state
+                state = intrvl
+                continue
+            else:
+                state = self.update_fn(state, intrvl)
+
+        self.done = True        
+        result = self.finalize_fn(state)
+        self.publish(result)
+        return True
+
