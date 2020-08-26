@@ -432,3 +432,88 @@ class TestFold(OpTestCase):
         results = run_to_finish(output)
         self.assertIntervalListEq(results, target)
 
+
+class TestJoin(OpTestCase):
+    intrvl_list_1 = [
+        Interval(Bounds3D(0, 10), {'msg': 'alpha'}),
+        Interval(Bounds3D(20, 30), {'msg': 'beta'}),
+        Interval(Bounds3D(40, 50), {'msg': 'gamma'}),
+    ]
+
+    intrvl_list_2 = [
+        Interval(Bounds3D(7, 12), {'msg': 'first'}),
+        Interval(Bounds3D(8, 25), {'msg': 'second'}),
+        Interval(Bounds3D(40, 50), {'msg': 'third'}),
+        Interval(Bounds3D(60, 70), {'msg': 'fourth'}),
+    ]
+
+    merge_msg = lambda i1, i2: Interval(i1.bounds.span(i2.bounds), {'msg': i1.payload['msg'] + "|" + i2.payload['msg']})
+
+    def test_equitime_join(self):
+        input_left = FromIterable(self.intrvl_list_1)()
+        input_right = FromIterable(self.intrvl_list_2)()
+        target = [
+            Interval(Bounds3D(40, 50), {'msg': 'gamma|third'}),
+        ]
+
+        output = JoinWithTimeWindow(
+            predicate=equal(),
+            merge_op=TestJoin.merge_msg
+        )(input_left, input_right)
+
+        results = run_to_finish(output)
+
+        self.assertIntervalListEq(results, target)
+
+        
+    def test_overlaptime_join(self):
+        input_left = FromIterable(self.intrvl_list_1)()
+        input_right = FromIterable(self.intrvl_list_2)()
+        target = [
+            Interval(Bounds3D(0, 12), {'msg': 'alpha|first'}),
+            Interval(Bounds3D(0, 25), {'msg': 'alpha|second'}),
+            Interval(Bounds3D(8, 30), {'msg': 'beta|second'}),
+            Interval(Bounds3D(40, 50), {'msg': 'gamma|third'}),
+        ]
+
+        output = JoinWithTimeWindow(
+            predicate=overlaps(),
+            merge_op=TestJoin.merge_msg
+        )(input_left, input_right)
+
+        results = run_to_finish(output)
+        self.assertIntervalListEq(results, target)
+
+
+    def test_cartessian_join(self):
+
+        input_left = FromIterable(self.intrvl_list_1)()
+        input_right = FromIterable(self.intrvl_list_2)()
+        target = [
+            Interval(Bounds3D(0, 12), {'msg': 'alpha|first'}),
+            Interval(Bounds3D(0, 25), {'msg': 'alpha|second'}),
+            Interval(Bounds3D(0, 50), {'msg': 'alpha|third'}),
+            Interval(Bounds3D(0, 70), {'msg': 'alpha|fourth'}),
+
+            Interval(Bounds3D(7, 30), {'msg': 'beta|first'}),
+            Interval(Bounds3D(8, 30), {'msg': 'beta|second'}),
+            Interval(Bounds3D(20, 50), {'msg': 'beta|third'}),
+            Interval(Bounds3D(20, 70), {'msg': 'beta|fourth'}),
+
+            Interval(Bounds3D(7, 50), {'msg': 'gamma|first'}),
+            Interval(Bounds3D(8, 50), {'msg': 'gamma|second'}),
+            Interval(Bounds3D(40, 50), {'msg': 'gamma|third'}),
+            Interval(Bounds3D(40, 70), {'msg': 'gamma|fourth'}),
+        ]
+        
+        sorted_target = sorted(target, key=lambda i: (i['t1'], i['t2']))
+
+        output = JoinWithTimeWindow(
+            predicate=lambda i1, i2: True,
+            merge_op=TestJoin.merge_msg
+        )(input_left, input_right)
+
+        results = run_to_finish(output)
+
+        sorted_results = sorted(results, key=lambda i: (i['t1'], i['t2']))
+        self.assertIntervalListEq(sorted_results, sorted_target)

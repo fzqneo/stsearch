@@ -491,6 +491,9 @@ class Fold(Op):
     ):
         """Folds a finite interval stream into a single output interval.
         Similar to Rekall's ``fold`` or DBMS's aggregate.
+        It keeps an internal state and repeatedly updates it based on incoming intervals,
+        until the input stream is finished. The state can be any type, not necessarily an Interval.
+        This Op should not be used on an infinite stream.
 
         Args:
             update_fn (typing.Callable[[typing.Any, Interval], typing.Any]): Update the internal state using a new interval. Return the new state.
@@ -528,3 +531,76 @@ class Fold(Op):
         self.publish(result)
         return True
 
+class JoinWithTimeWindow(Op):
+    """XXX the output doesn't necessarily satisfy temporal order.
+
+    Args:
+        Op ([type]): [description]
+    """
+
+    def __init__(
+        self,
+        predicate: typing.Callable[[Interval, Interval], bool], 
+        merge_op: typing.Callable[[Interval, Interval], Interval],
+        window = 900,
+        name = None
+    ):
+        super().__init__(name)
+        self.predicate = predicate
+        self.merge_op = merge_op
+        self.window = window
+
+    def call(self, left_stream, right_stream):
+        self.left_stream = left_stream
+        self.right_stream = right_stream
+    
+        self.left_done = self.right_done = False
+        self.left_buf = []
+        self.right_buf = []
+        self.result_buf = []
+
+    def execute(self):
+        while not (self.left_done and self.right_done):
+            if not self.left_done:
+                # get a new interval from left
+                iL = self.left_stream.get()
+                if iL is None:
+                    self.left_done = True
+                else:
+                    # add to buffer
+                    self.left_buf.append(iL)
+                    # purge too-old intervals from right buffer
+                    self.right_buf = [iR for iR in self.right_buf if iR['t1'] >= iL['t1'] - self.window ]
+                    # probe the right buf and join
+                    hits = [
+                        self.merge_op(iL, iR) for iR in self.right_buf 
+                        if iR['t1'] <= iL['t2'] + self.window and self.predicate(iL, iR)
+                    ]
+                    if hits:
+                        for h in hits:
+                            self.publish(h) # assuming queue doesn't block
+                        return True
+            
+            # mirror
+            if not self.right_done:
+                iR = self.right_stream.get()
+                if iR is None:
+                    self.right_done = True
+                else:
+                    self.right_buf.append(iR)
+                    self.left_buf = [iL for iL in self.left_buf if iL['t1'] >= iR['t1'] - self.window]
+                    hits = [
+                        self.merge_op(iL, iR) for iL in self.left_buf
+                        if iL['t1'] <= iR['t2'] + self.window and self.predicate(iL, iR)
+                    ]
+                    if hits:
+                        for h in hits:
+                            self.publish(h)
+                        return True
+
+        return False
+
+
+
+# alias
+Join = JoinWithTimeWindow
