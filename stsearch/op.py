@@ -490,8 +490,8 @@ class Fold(Op):
         name = None
     ):
         """Folds a finite interval stream into a single output interval.
-        Similar to Rekall's ``fold`` or DBMS's aggregate.
-        It keeps an internal state and repeatedly updates it based on incoming intervals,
+        Similar to Rekall's ``IntervalSet.fold``, DBMS's aggregate, and MapReduce's reduce (though not necessarily commutative).
+        It keeps an internal state and repeatedly updates it using incoming intervals,
         until the input stream is finished. The state can be any type, not necessarily an Interval.
         This Op should not be used on an infinite stream.
 
@@ -532,10 +532,18 @@ class Fold(Op):
         return True
 
 class JoinWithTimeWindow(Op):
-    """XXX the output doesn't necessarily satisfy temporal order.
+    """
+    Join two ``IntervalStream`` by finding pairs that satisfy the join predicate. 
+    Instead of checking the full Cartessian product, it only examines pairs of intervals
+    whose ``t1`` are within ``window`` of each other. 
 
-    Args:
-        Op ([type]): [description]
+    For the output to maintain the temporal assumption, the following conditions must hold:
+    1. The two input streams meet the temporal assumption
+    2. The join result's temporal bound is "contained" within the temporal span of the joined pair.
+    For example, joining (t1=10, t2=30) and (t1=15, t2=45) may produce (t1=10, t2=40). 
+    Producing (t1=5, t2=60) violates this assumption, and the temporal order of the output
+    cannot be guaranteed.
+
     """
 
     def __init__(
@@ -545,6 +553,14 @@ class JoinWithTimeWindow(Op):
         window = 900,
         name = None
     ):
+        """[summary]
+
+        Args:
+            predicate (typing.Callable[[Interval, Interval], bool]): The predicate function that will be checked on pairs within ``window`` of each other
+            merge_op (typing.Callable[[Interval, Interval], Interval]): Produce an output ``Interval`` based on a joined pair of ``Interval``
+            window (int, optional): Windows on ``t1``. Defaults to 900.
+            name ([type], optional): [description]. Defaults to None.
+        """
         super().__init__(name)
         self.predicate = predicate
         self.merge_op = merge_op
@@ -557,16 +573,35 @@ class JoinWithTimeWindow(Op):
         self.left_done = self.right_done = False
         self.left_buf = []
         self.right_buf = []
-        self.result_buf = []
+        self.result_buf = []    # keep sorted on t1
 
     def execute(self):
+        # When we get a new input `iL` from left, we:
+        # 1. purge right_buf of intervals that are too old before `iL`'s window
+        # 2. join `iL` with right_buf considering `predicate` and window. Joined results are added to `result_buf`
+        # 3. append `iL` to left_buf
+        # Mirror operations on the right side.
+
+        # a buffered result can be released only when the heads (earliest) of left_buf and right_buf are 
+        # outside its window. Otherwise, a new incoming interval can generate a join result that
+        # should be output first
+
         while not (self.left_done and self.right_done):
+            if (len(self.result_buf) > 0
+                and self.result_buf[0]['t1'] + self.window < self.left_buf[0]['t1']
+                and self.result_buf[0]['t1'] + self.window < self.right_buf[0]['t1']):
+                # we can release a result
+                # logger.debug(f"releasing {self.result_buf[0].payload['msg']}")
+                self.publish(self.result_buf.pop(0))
+                return True
+                
             if not self.left_done:
                 # get a new interval from left
                 iL = self.left_stream.get()
                 if iL is None:
                     self.left_done = True
                 else:
+                    # logger.debug(f"get left {iL.payload['msg']}")
                     # add to buffer
                     self.left_buf.append(iL)
                     # purge too-old intervals from right buffer
@@ -574,12 +609,11 @@ class JoinWithTimeWindow(Op):
                     # probe the right buf and join
                     hits = [
                         self.merge_op(iL, iR) for iR in self.right_buf 
-                        if iR['t1'] <= iL['t2'] + self.window and self.predicate(iL, iR)
+                        if iR['t1'] <= iL['t1'] + self.window and self.predicate(iL, iR)
                     ]
-                    if hits:
-                        for h in hits:
-                            self.publish(h) # assuming queue doesn't block
-                        return True
+
+                    self.result_buf.extend(hits)
+                    self.result_buf.sort(key=lambda i: (i['t1'], i['t2']))
             
             # mirror
             if not self.right_done:
@@ -587,19 +621,22 @@ class JoinWithTimeWindow(Op):
                 if iR is None:
                     self.right_done = True
                 else:
+                    # logger.debug(f"get right {iR.payload['msg']}")
                     self.right_buf.append(iR)
                     self.left_buf = [iL for iL in self.left_buf if iL['t1'] >= iR['t1'] - self.window]
                     hits = [
                         self.merge_op(iL, iR) for iL in self.left_buf
-                        if iL['t1'] <= iR['t2'] + self.window and self.predicate(iL, iR)
+                        if iL['t1'] <= iR['t1'] + self.window and self.predicate(iL, iR)
                     ]
-                    if hits:
-                        for h in hits:
-                            self.publish(h)
-                        return True
 
-        return False
+                    self.result_buf.extend(hits)
+                    self.result_buf.sort(key=lambda i: (i['t1'], i['t2']))
 
+        if len(self.result_buf) > 0:
+            self.publish(self.result_buf.pop(0))
+            return True
+        else:
+            return False
 
 
 # alias

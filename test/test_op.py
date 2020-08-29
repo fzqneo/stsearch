@@ -433,7 +433,7 @@ class TestFold(OpTestCase):
         self.assertIntervalListEq(results, target)
 
 
-class TestJoin(OpTestCase):
+class TestJoinWithTimeWindow(OpTestCase):
     intrvl_list_1 = [
         Interval(Bounds3D(0, 10), {'msg': 'alpha'}),
         Interval(Bounds3D(20, 30), {'msg': 'beta'}),
@@ -458,7 +458,7 @@ class TestJoin(OpTestCase):
 
         output = JoinWithTimeWindow(
             predicate=equal(),
-            merge_op=TestJoin.merge_msg
+            merge_op=TestJoinWithTimeWindow.merge_msg
         )(input_left, input_right)
 
         results = run_to_finish(output)
@@ -478,7 +478,7 @@ class TestJoin(OpTestCase):
 
         output = JoinWithTimeWindow(
             predicate=overlaps(),
-            merge_op=TestJoin.merge_msg
+            merge_op=TestJoinWithTimeWindow.merge_msg
         )(input_left, input_right)
 
         results = run_to_finish(output)
@@ -510,10 +510,42 @@ class TestJoin(OpTestCase):
 
         output = JoinWithTimeWindow(
             predicate=lambda i1, i2: True,
-            merge_op=TestJoin.merge_msg
+            merge_op=TestJoinWithTimeWindow.merge_msg
         )(input_left, input_right)
 
         results = run_to_finish(output)
 
-        sorted_results = sorted(results, key=lambda i: (i['t1'], i['t2']))
-        self.assertIntervalListEq(sorted_results, sorted_target)
+        self.assertIntervalListEq(results, sorted_target)
+
+    
+    def test_cartessian_join_with_small_window(self):
+
+        input_left = FromIterable(self.intrvl_list_1)()
+        input_right = FromIterable(self.intrvl_list_2)()
+        window = 30
+        target = [
+            # alpha should not join third and fourth
+            Interval(Bounds3D(0, 12), {'msg': 'alpha|first'}),
+            Interval(Bounds3D(0, 25), {'msg': 'alpha|second'}),
+
+            # beta should not join fourth
+            Interval(Bounds3D(7, 30), {'msg': 'beta|first'}),
+            Interval(Bounds3D(8, 30), {'msg': 'beta|second'}),
+            Interval(Bounds3D(20, 50), {'msg': 'beta|third'}),
+
+            # gamma should not join first and second
+            Interval(Bounds3D(40, 50), {'msg': 'gamma|third'}),
+            Interval(Bounds3D(40, 70), {'msg': 'gamma|fourth'}),
+        ]
+        
+        sorted_target = sorted(target, key=lambda i: (i['t1'], i['t2']))
+
+        output = JoinWithTimeWindow(
+            predicate=lambda i1, i2: True,
+            merge_op=TestJoinWithTimeWindow.merge_msg,
+            window=window
+        )(input_left, input_right)
+
+        results = run_to_finish(output)
+
+        self.assertIntervalListEq(results, sorted_target)
