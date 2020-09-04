@@ -549,3 +549,63 @@ class TestJoinWithTimeWindow(OpTestCase):
         results = run_to_finish(output)
 
         self.assertIntervalListEq(results, sorted_target)
+
+
+
+class TestAntiJoinWithTimeWindow(OpTestCase):
+    intrvl_list_1 = [
+        Interval(Bounds3D(0, 10), {'msg': 'alpha'}),
+        Interval(Bounds3D(20, 30), {'msg': 'beta'}),
+        Interval(Bounds3D(40, 50), {'msg': 'gamma'}),
+    ]
+
+    intrvl_list_2 = [
+        Interval(Bounds3D(7, 12), {'msg': 'first'}),
+        Interval(Bounds3D(60, 70), {'msg': 'fourth'}),
+    ]
+
+    intrvl_list_3 = [
+        Interval(Bounds3D(7, 45), {'msg': 'bang!'}),
+    ]
+
+    def test_overlaptime_antijoin(self):
+        input_left = FromIterable(self.intrvl_list_1)()
+        input_right = FromIterable(self.intrvl_list_2)()
+        target = [
+            # alpha should be dropped because it matches first
+            Interval(Bounds3D(20, 30), {'msg': 'beta'}),
+            Interval(Bounds3D(40, 50), {'msg': 'gamma'}),
+        ]
+
+        output = AntiJoinWithTimeWindow(
+            predicate=overlaps(),
+        )(input_left, input_right)
+
+        results = run_to_finish(output)
+        self.assertIntervalListEq(results, target)
+
+    
+    def test_pass_all_antijoin(self):
+        input_left = FromIterable(self.intrvl_list_1)()
+        input_right = FromIterable(self.intrvl_list_2)()
+        target = self.intrvl_list_1
+
+        output = AntiJoinWithTimeWindow(
+            predicate=lambda i1, i2: False, # don't drop any
+        )(input_left, input_right)
+
+        results = run_to_finish(output)
+        self.assertIntervalListEq(results, target)
+
+    
+    def test_drop_all_antijoin(self):
+        input_left = FromIterable(self.intrvl_list_1)()
+        input_right = FromIterable(self.intrvl_list_3)()
+        target = [] 
+
+        output = AntiJoinWithTimeWindow(
+            predicate=overlaps()
+        )(input_left, input_right)
+
+        results = run_to_finish(output)
+        self.assertIntervalListEq(results, target)

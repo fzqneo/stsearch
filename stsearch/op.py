@@ -591,7 +591,6 @@ class JoinWithTimeWindow(Op):
                 and self.result_buf[0]['t1'] + self.window < self.left_buf[0]['t1']
                 and self.result_buf[0]['t1'] + self.window < self.right_buf[0]['t1']):
                 # we can release a result
-                # logger.debug(f"releasing {self.result_buf[0].payload['msg']}")
                 self.publish(self.result_buf.pop(0))
                 return True
                 
@@ -601,7 +600,6 @@ class JoinWithTimeWindow(Op):
                 if iL is None:
                     self.left_done = True
                 else:
-                    # logger.debug(f"get left {iL.payload['msg']}")
                     # add to buffer
                     self.left_buf.append(iL)
                     # purge too-old intervals from right buffer
@@ -621,7 +619,6 @@ class JoinWithTimeWindow(Op):
                 if iR is None:
                     self.right_done = True
                 else:
-                    # logger.debug(f"get right {iR.payload['msg']}")
                     self.right_buf.append(iR)
                     self.left_buf = [iL for iL in self.left_buf if iL['t1'] >= iR['t1'] - self.window]
                     hits = [
@@ -641,3 +638,97 @@ class JoinWithTimeWindow(Op):
 
 # alias
 Join = JoinWithTimeWindow
+
+
+class AntiJoinWithTimeWindow(Op):
+    """
+    Emit an interval from the left side if it does NOT match any interval in the right side.
+    Matching is determinted by a ``predicate`` function. 
+    Similar to ``JoinWithTimeWindow``, matching is considered only within a time window.
+    """
+
+    def __init__(
+        self,
+        predicate: typing.Callable[[Interval, Interval], bool], 
+        window = 900,
+        name = None
+    ):
+        """[summary]
+
+        Args:
+            predicate (typing.Callable[[Interval, Interval], bool]): The predicate function that will be checked on pairs within ``window`` of each other
+            window (int, optional): Windows on ``t1``. Defaults to 900.
+            name ([type], optional): [description]. Defaults to None.
+        """
+        super().__init__(name)
+        self.predicate = predicate
+        self.window = window
+
+    def call(self, left_stream, right_stream):
+        self.left_stream = left_stream
+        self.right_stream = right_stream
+    
+        self.left_done = self.right_done = False
+        self.left_buf = []
+        self.right_buf = []
+
+    def execute(self):
+        # The high-level idea is to drop a left interval as soon as we find a match for it in the right side.
+        #
+        # When we get a new input `iL` from left, we:
+        # 1. purge right_buf of intervals that are too old before `iL`'s window
+        # 2. scan right_buf and see if there's any match
+        # 3. if yes, drop `iL` immeidately and no further processing is needed; otherwise, append it to left_buf
+
+        # Similar mirror operations on the right side, except that we still drop the left interval found in a match,
+        # and will append `iR` to right_buf
+
+        # We can release a left interval only when the tail (latest) of right_buf is outside its window.
+
+        while not self.right_done:
+            # break out when right done. when so, all left_buf can be released
+
+            if (len(self.left_buf) > 0 
+                and len(self.right_buf) > 0
+                and self.left_buf[0]['t1'] + self.window < self.right_buf[-1]['t1']):
+                # we can release a left
+                self.publish(self.left_buf.pop(0))
+                return True
+                
+            if not self.left_done:
+                # get a new interval from left
+                iL = self.left_stream.get()
+                if iL is None:
+                    self.left_done = True
+                else:
+                    # purge too-old intervals from right buffer
+                    self.right_buf = [iR for iR in self.right_buf if iR['t1'] >= iL['t1'] - self.window ]
+                    # check if there's any match in window
+                    if any(((iR['t1'] <= iL['t1'] + self.window and self.predicate(iL, iR)) for iR in self.right_buf)):
+                        iL = None   # drop, no more business
+                    else:
+                        # add to buffer
+                        self.left_buf.append(iL)
+            
+            # mirror with difference 
+            if not self.right_done:
+                iR = self.right_stream.get()
+                if iR is None:
+                    self.right_done = True
+                else:
+                    # two steps in one: purge too-old from the left; check match and keep only un-match or out-of-window
+                    self.left_buf = [
+                        iL for iL in self.left_buf 
+                        if iL['t1'] >= iR['t1'] - self.window
+                        and not (iL['t1'] <= iR['t1'] + self.window and self.predicate(iL, iR))
+                    ]
+                    self.right_buf.append(iR)
+
+        if len(self.left_buf) > 0:
+            self.publish(self.left_buf.pop(0))
+            return True
+        else:
+            return False
+
+# alias
+AntiJoin = AntiJoinWithTimeWindow

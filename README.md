@@ -1,1 +1,3 @@
 # stsearch
+
+Space-time search.
