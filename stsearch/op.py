@@ -368,7 +368,7 @@ class Coalesce(Op):
                         new_current_intrvls.append(cur)            
                 else:
                     #adds all non-overlapping intervals to new_coalesced_intrvls
-                    logger.debug(f"Adding to publishable: {cur}")
+                    # logger.debug(f"Adding to publishable: {cur}")
                     new_coalesced_intrvls.append(cur)
 
             current_intrvls = new_current_intrvls

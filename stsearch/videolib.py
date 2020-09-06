@@ -103,6 +103,8 @@ class FrameGroupInterval(Interval):
                   ):
         # .mp4 and .avi require different fourcc
         # we only do mp4 for now
+        # We can't use h264 encoding because of https://github.com/skvark/opencv-python/issues/100#issuecomment-394159998
+        # the generated video may not play in most browsers.
         H, W = self.frames[0].shape[:2]
         logger.debug(f"VideoWrite fps={fps}, W={W}, H={H}")
         vw = cv2.VideoWriter(str(path), cv2_videowriter_fourcc, fps, (W,H))
