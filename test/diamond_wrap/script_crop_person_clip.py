@@ -23,7 +23,7 @@ def query(path):
     long_coalesced_persons = Filter(
         pred_fn=lambda framegrps: framegrps.bounds.length() > fps * 3 # 3 seconds
     )(coalesced_persons)
-    framegrps = LocalVideoCropInterval(path)(long_coalesced_persons)
+    framegrps = LocalVideoCropFrameGroup(path)(long_coalesced_persons)
 
     for _, fg in enumerate(run_to_finish(framegrps)):
         rv.append((fg.bounds, fg.get_mp4(), 'mp4'))

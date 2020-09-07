@@ -14,15 +14,14 @@ OUTPUT_DIR = Path(__file__).stem + "_output"
 
 if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    det_key = "03_just_some_unique_key"
     
     all_frames = LocalVideoToFrames(INPUT_NAME)()
     sampled_frames = Slice(step=30, end=1800)(all_frames)
     detections = Detection(
         'cloudlet031.elijah.cs.cmu.edu', 
         5000, 
-        result_key=det_key)(sampled_frames)
-    frames_with_target = DetectionFilter(['bus'], 0.5, result_key=det_key)(detections)
+    )(sampled_frames)
+    frames_with_target = DetectionFilter(['bus'], 0.5)(detections)
 
     results = frames_with_target.subscribe()
     frames_with_target.start_thread_recursive()

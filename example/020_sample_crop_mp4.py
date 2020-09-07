@@ -21,7 +21,7 @@ if __name__ == "__main__":
     ]
 
     crop_intervals = FromIterable(intervals_to_crop)()
-    framegroups = LocalVideoCropInterval(INPUT_NAME)(crop_intervals)
+    framegroups = LocalVideoCropFrameGroup(INPUT_NAME)(crop_intervals)
 
     for k, fg in enumerate(run_to_finish(framegroups)):
         assert isinstance(fg, FrameGroupInterval)

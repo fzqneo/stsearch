@@ -198,7 +198,7 @@ class LocalVideoToFrames(Op):
             return False
 
 
-class LocalVideoCropInterval(Graph):
+class LocalVideoCropFrameGroup(Graph):
     def __init__(self, path, copy_payload=True):
         self.decoder = LocalVideoDecoder(path)
         self.copy_payload = copy_payload
