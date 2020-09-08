@@ -410,13 +410,13 @@ class Coalesce(Op):
 
 
 class CoalesceByLast(Graph):
-    """Similar to ``Coalesce``, but ``predicate`` is applied differretly:
+    """Similar to ``Coalesce``, except that ``predicate`` is applied differretly:
     For each pending coalesced interval,
     this op keeps track of the last input interval that was merged.
     When deciding whether a new input interval should be merged, ``predicate``
     is applied on the tracked "last" interval and the incoming interval,
     rather than the whole pending interval and the incoming interval
-    (which ``Coalesce`` does).
+    (the behavior of ``Coalesce``).
 
     This op is useful for tracking an object that's slowly moving in the scene.
     If using ``Coalesce``, IoU test will at some point fail because the coalesced

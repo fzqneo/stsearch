@@ -18,6 +18,7 @@ if __name__ == "__main__":
     all_frames = LocalVideoToFrames(INPUT_NAME)()
     sampled_frames = Slice(step=30, end=450)(all_frames)
     detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
+    # `DetectionFilterFlatten` separates the patches while `DetectionFilter` just filters whole frames.
     person_crops = DetectionFilterFlatten(['person'], 0.5)(detections)
     large_person_crops = Filter(
         pred_fn=lambda ii: ii.bounds.height() > 0.05
