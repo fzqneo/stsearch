@@ -6,7 +6,7 @@ from logzero import logger
 import numpy as np
 
 from rekall.bounds import Bounds3D
-from rekall.predicates import _area, _height, _width, iou_at_least
+from rekall.predicates import _area, _height, _width, iou_at_least, overlaps_before
 
 from stsearch.cvlib import Detection, DetectionFilter, DetectionFilterFlatten
 from stsearch.interval import *
@@ -35,6 +35,7 @@ class TrackFromBounds(Op):
     def execute(self):
         i1 = self.instream.get()
         if i1 is None:
+            print("Exiting track op")
             return False
         
         tracker = cv2.TrackerCSRT_create()
@@ -72,18 +73,34 @@ if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     fps = 15
-    sample_every = 15
+    detect_every = 15
     
     all_frames = LocalVideoToFrames(INPUT_NAME)()
-    sampled_frames = Slice(step=sample_every)(all_frames)
+    sampled_frames = Slice(step=detect_every)(all_frames)
     detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
     crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
 
-    track_person_trajectory = TrackFromBounds(LocalVideoDecoder(INPUT_NAME), 5*fps)(crop_persons)
+    track_person_trajectories = TrackFromBounds(LocalVideoDecoder(INPUT_NAME), detect_every+1)(crop_persons)
+
+    def trajectory_merge_predicate(i1, i2):
+        return i1['t1'] < i2['t1'] \
+            and i1['t2'] >= i2['t1'] - 2 \
+            and iou_at_least(0.5)(i1.payload['trajectory'][-1], i2.payload['trajectory'][0])
+
+    def trajectory_payload_merge_op(p1, p2):
+        print(f"Merging two trajectories of lengths {len(p1['trajectory'])} and {len(p2['trajectory'])}")
+        return {'trajectory': p1['trajectory'] + p2['trajectory']}
+
+    coalesced_trajectories = CoalesceByLast(
+        predicate=trajectory_merge_predicate,
+        bounds_merge_op=Bounds3D.span,
+        payload_merge_op=trajectory_payload_merge_op,
+        epsilon=1.1*detect_every
+    )(track_person_trajectories)
 
     long_coalesced_persons = Filter(
-        pred_fn=lambda intrvl: intrvl.bounds.length() >= fps * 3
-    )(track_person_trajectory)
+        pred_fn=lambda intrvl: intrvl.bounds.length() >= fps * 5
+    )(coalesced_trajectories)
 
     raw_fg = LocalVideoCropFrameGroup(INPUT_NAME, copy_payload=True)(long_coalesced_persons)
 
@@ -127,4 +144,4 @@ if __name__ == "__main__":
         logger.debug(f"saved {out_name}")
 
     logger.info("""You should find cropped .mp4 videos that 'bounds' a moving person. 
-        We use CoalesceByLast and image hash to do a form of tracking.""")
+        We use trackers from OpenCV.""")
