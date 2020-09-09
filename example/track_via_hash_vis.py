@@ -24,17 +24,17 @@ if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     fps = 15
-    sample_every = 5
+    detect_every = 3
     
     all_frames = LocalVideoToFrames(INPUT_NAME)()
-    sampled_frames = Slice(step=sample_every)(all_frames)
+    sampled_frames = Slice(step=detect_every)(all_frames)
     detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
     crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
 
     # Both phash and BMHash are okay. Marr hash not so good.
-    # hasher = cv2.img_hash.PHash_create()
+    hasher = cv2.img_hash.PHash_create()
     # hasher = cv2.img_hash.MarrHildrethHash_create()
-    hasher = cv2.img_hash.BlockMeanHash_create(cv2.img_hash.BLOCK_MEAN_HASH_MODE_0)
+    # hasher = cv2.img_hash.BlockMeanHash_create(cv2.img_hash.BLOCK_MEAN_HASH_MODE_0)
 
     def hash_map_fn(intrvl):
         h = hasher.compute(intrvl.rgb)
@@ -43,12 +43,13 @@ if __name__ == "__main__":
 
     persons_with_hash = Map(hash_map_fn, name="image-hash")(crop_persons)
 
-    def track_predicate(i1, i2):
+    def coalesce_predicate(i1, i2):
         hdiff = hasher.compare(i1.payload['hash'], i2.payload['hash']) 
         L2 = np.linalg.norm(centroid(i1) - centroid(i2))
-        return 0.5 <= _area(i1) / _area(i2) <= 2 \
-            and (hdiff <= 30 and L2 < 0.5  or 
-                hdiff <= 100 and L2 < _width(i1) * 2)
+        return i1['t1'] < i2['t1']  \
+            and 0.5 <= _area(i1) / _area(i2) <= 2 \
+            and (hdiff <= 10 and L2 < 0.5  or 
+                hdiff <= 60 and L2 < _height(i1) * 0.5)
 
     def track_interval_merge_op(i1, i2):
         new_bounds = i1.bounds.span(i2)
@@ -62,8 +63,8 @@ if __name__ == "__main__":
         return Interval(new_bounds, new_payload)
 
     tracked_persons = CoalesceByLast(
-        predicate=track_predicate,
-        epsilon=sample_every,
+        predicate=coalesce_predicate,
+        epsilon=detect_every*2,
         interval_merge_op=track_interval_merge_op)(persons_with_hash)
 
     long_coalesced_persons = Filter(
@@ -92,7 +93,7 @@ if __name__ == "__main__":
             # somehow polylines doesn't work
             # f1 = cv2.polylines(f1, pts, is_closed, color, thickness)
             for j, (p1, p2) in enumerate(zip(pts[:-1], pts[1:])):
-                print("Drawing", p1, p2)
+                print("Drawing line", p1, p2)
                 f1 = cv2.line(f1, tuple(p1), tuple(p2), color, thickness)
                 f1 = cv2.putText(f1, str(j), tuple(p1), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,255), 1, cv2.LINE_AA)
             new_frames.append(f1)
