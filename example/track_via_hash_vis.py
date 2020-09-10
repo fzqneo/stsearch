@@ -6,7 +6,7 @@ from logzero import logger
 import numpy as np
 
 from rekall.bounds import Bounds3D
-from rekall.predicates import _area, _height, _width, iou_at_least
+from rekall.predicates import _area, _height, _width, and_pred, before, iou_at_least
 
 from stsearch.cvlib import Detection, DetectionFilter, DetectionFilterFlatten
 from stsearch.interval import *
@@ -46,12 +46,16 @@ if __name__ == "__main__":
     def coalesce_predicate(i1, i2):
         hdiff = hasher.compare(i1.payload['hash'], i2.payload['hash']) 
         L2 = np.linalg.norm(centroid(i1) - centroid(i2))
-        return i1['t1'] < i2['t1']  \
+        return before(1)(i1, i2)  \
             and 0.5 <= _area(i1) / _area(i2) <= 2 \
-            and (hdiff <= 10 and L2 < 0.5  or 
-                hdiff <= 60 and L2 < _height(i1) * 0.5)
+            and hdiff <= 60 \
+            and L2 < _height(i1)
 
-    def track_interval_merge_op(i1, i2):
+    def coalesec_distance(i1, i2):
+        hdiff = hasher.compare(i1.payload['hash'], i2.payload['hash']) 
+        return hdiff
+
+    def coalesce_interval_merge_op(i1, i2):
         new_bounds = i1.bounds.span(i2)
         new_payload = i1.payload.copy()
 
@@ -65,7 +69,8 @@ if __name__ == "__main__":
     tracked_persons = CoalesceByLast(
         predicate=coalesce_predicate,
         epsilon=detect_every*2,
-        interval_merge_op=track_interval_merge_op)(persons_with_hash)
+        interval_merge_op=coalesce_interval_merge_op,
+        distance=coalesec_distance)(persons_with_hash)
 
     long_coalesced_persons = Filter(
         pred_fn=lambda intrvl: intrvl.bounds.length() >= fps * 5

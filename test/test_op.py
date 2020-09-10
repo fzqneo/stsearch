@@ -4,7 +4,7 @@ import unittest
 from logzero import logger
 
 from rekall import Bounds3D
-from rekall.predicates import iou_at_least
+from rekall.predicates import _iou, and_pred, before, iou_at_least
 
 from stsearch.interval import *
 from stsearch.op import *
@@ -189,6 +189,14 @@ class TestCoalesce(OpTestCase):
         Interval(Bounds3D(115, 120, 0., .79, .0, .79), {'msg': 'third person shrinks. frame 110~120'}),
     ]
 
+    intrvl_list_iou_distance = [
+        Interval(Bounds3D(0, 1, 0., .5, 0., .5), {'msg': 'first person starts at frame 0'}),
+        Interval(Bounds3D(5, 6, .01, .51, .01, .51), {'msg': 'first person continues'}),
+        Interval(Bounds3D(10, 11, 0.02, .52, 0.02, .52), {'msg': 'first person ends at frame 10'}),
+
+        Interval(Bounds3D(5, 6, .1, .6, .1, .6), {'msg': 'second person starts at frame 5 and overlaps with first too'}),
+    ]
+
 
     def test_set_coalesce_no_overlap(self):
         output = SetCoalesce(
@@ -370,6 +378,24 @@ class TestCoalesce(OpTestCase):
         # print(results)
         self.assertIntervalListEq(results, target, bounds_only=True)
 
+    def test_coalesce_iou_distance(self):
+
+        input_list = self.intrvl_list_iou_distance
+
+        target = [
+            Interval(Bounds3D(0, 11, 0., .52, 0., .52), {'msg': 'first person starts at frame 0'}),
+            Interval(Bounds3D(5, 6, .1, .6, .1, .6), {'msg': 'second person starts at frame 5 and overlaps with first too'}),
+        ]
+
+        output = Coalesce(
+            axis=('t1', 't2'), 
+            bounds_merge_op=Bounds3D.span, 
+            predicate=and_pred(before(), iou_at_least(0.001)), # both persons at frame 5 should pass
+            epsilon=6,
+            distance=_iou)(FromIterable(input_list)())
+
+        results = run_to_finish(output)
+        self.assertIntervalListEq(results, target, bounds_only=True)
 
         
 class TestFold(OpTestCase):

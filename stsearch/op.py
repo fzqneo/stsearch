@@ -289,9 +289,10 @@ class Coalesce(Op):
                 bounds_merge_op: typing.Callable[[Bounds, Bounds], Bounds] = Bounds3D.span,
                 payload_merge_op: typing.Callable[[dict, dict], dict] = lambda p1, p2: p1,
                 predicate: typing.Optional[typing.Callable[[Interval, Interval], bool]] = None,
-                epsilon: float = 0.,
+                epsilon: float = 900.,
                 axis=('t1', 't2'),
                 interval_merge_op: typing.Optional[typing.Callable[[Interval, Interval], Interval]] = None,
+                distance: typing.Optional[typing.Callable[[Interval, Interval], float]] = None,
                 name=None):
         """If ``interval_merge_op`` is not None, ``payload_merge_op`` and ``bounds_merge_op`` will be ignored.
 
@@ -299,12 +300,17 @@ class Coalesce(Op):
             bounds_merge_op (function): takes two ``Bounds`` objects and returns one ``Bounds`` object
             payload_merge_op (function, optional): takes two payloads and returns one. Defaults to taking the first payload.
             predicate (function, optional): takes two intervals and return Boolean. Defaults to None.
-            epsilon (int, optional): [description]. Defaults to 0.
+            epsilon (int, optional): The maximum temporal gap allowed between two coalesced intervals. Although it's possible
+                to incorporate this condition in ``predicate``, this argument provides a simpler expression
+                and accelerates processing. Defaults to 900.
             axis (tuple, optional): [description]. Defaults to ('t1', 't2').
             interval_merge_op (function, optional): takes two ``Interval`` objects and returns one. 
                 If not None, it is used to create a merged interval; ``bounds_merge_op`` and ``payload_merge_op`` will be
-                ignored in this case. This is useful, e.g., when the new payload depends on the bounds of the input intervals.
+                ignored in this case. This is useful, e.g., when the new payload depends on the bounds of the merged intervals.
                 Defaults to None.
+            distance (function, optional): When there're multiple candidates to coalesce with a new interval,
+                use this function to find the one with minimum distance to the new interval. 
+                Defaults to a constant, thus breaking ties randomly.
             name ([type], optional): [description]. Defaults to None.
         """
 
@@ -313,9 +319,10 @@ class Coalesce(Op):
         self.payload_merge_op = payload_merge_op
         self.interval_merge_op = interval_merge_op
 
-        self.predicate = predicate
+        self.predicate = predicate or (lambda i1, i2: True)
         self.epsilon = epsilon
         self.axis = axis
+        self.distance = distance or (lambda i1, i2: 1.)
 
         self.publishable_coalesced_intrvls = []
         self.pending_coalesced_intrvls = []
@@ -353,6 +360,7 @@ class Coalesce(Op):
             predicate = self.predicate
             epsilon = self.epsilon
             axis = self.axis
+            distance = self.distance
 
             new_coalesced_intrvls = self.publishable_coalesced_intrvls
             current_intrvls = self.pending_coalesced_intrvls
@@ -364,37 +372,38 @@ class Coalesce(Op):
 			        axis[1] : 't2'
 		        })(or_pred(overlaps(),
                     before(max_dist=epsilon)))(cur, intrvl):
-                        #adds overlapping intervals to new_current_intrvls
+                        # add overlapping/near intervals to new_current_intrvls
                         new_current_intrvls.append(cur)            
                 else:
-                    #adds all non-overlapping intervals to new_coalesced_intrvls
+                    # others intervals can be released, add to new_coalesced_intrvls
                     # logger.debug(f"Adding to publishable: {cur}")
                     new_coalesced_intrvls.append(cur)
 
             current_intrvls = new_current_intrvls
-            matched_intrvl = None
-            loc = len(current_intrvls) - 1
 
-            #if current_intrvls is empty, we need to start constructing a new set of coalesced intervals
+            #if current_intrvls is empty, we need to start constructing a new set of pending intervals
             if len(current_intrvls) == 0:
                 current_intrvls.append(intrvl.copy())
                 self.publishable_coalesced_intrvls = sorted(new_coalesced_intrvls)
                 self.pending_coalesced_intrvls = sorted(current_intrvls)
                 continue
             
-            if predicate is None:
-                matched_intrvl = current_intrvls[-1]
-            else:
-                for index, cur in enumerate(current_intrvls):
-                    if predicate(cur, intrvl):
+            matched_intrvl = None
+            min_dist = float('inf')
+            loc = None
+            for index, cur in enumerate(current_intrvls):
+                if predicate(cur, intrvl):
+                    d = distance(cur, intrvl)
+                    if d < min_dist:
                         matched_intrvl = cur
                         loc = index
+                        min_dist = d 
 
             #if no matching interval is found, this implies that intrvl should be the start of a new coalescing interval
             if matched_intrvl is None:
                 current_intrvls.append(intrvl)
             else:
-                # merge matched intrvl with the new intrvl
+                # finally, do the merge
                 if interval_merge_op is not None:
                     current_intrvls[loc] = interval_merge_op(matched_intrvl, intrvl)
                 else:
@@ -410,10 +419,10 @@ class Coalesce(Op):
 
 
 class CoalesceByLast(Graph):
-    """Similar to ``Coalesce``, except that ``predicate`` is applied differretly:
+    """Similar to ``Coalesce``, except that ``predicate`` and ``distance`` is applied differretly:
     For each pending coalesced interval,
     this op keeps track of the last input interval that was merged.
-    When deciding whether a new input interval should be merged, ``predicate``
+    When deciding whether a new input interval should be merged, ``predicate`` and ``distance``
     is applied on the tracked "last" interval and the incoming interval,
     rather than the whole pending interval and the incoming interval
     (the behavior of ``Coalesce``).
@@ -430,28 +439,39 @@ class CoalesceByLast(Graph):
                 predicate=None,
                 epsilon=0,
                 axis=('t1', 't2'),
-                interval_merge_op=None):
+                interval_merge_op=None,
+                distance=lambda i1, i2: 1.):
 
         super().__init__()
 
         self.bounds_merge_op = bounds_merge_op
         self.payload_merge_op = payload_merge_op
         self.predicate = predicate
-        self.predicate = predicate
         self.epsilon = epsilon
         self.axis = axis
         self.interval_merge_op = interval_merge_op
+        self.distance = distance
 
         # a secret key to track the last interval, should be removed when finish
         self.key_last = "coalesce_last_" + str(uuid.uuid4())
 
     def call(self, instream):
 
-        def predicate_1(pending_i, new_i):
-            last_i = pending_i.payload.get(self.key_last, pending_i)
-            return self.predicate(last_i, new_i)
+        if self.predicate:
+            def predicate_wrap(pending_i, new_i):
+                last_i = pending_i.payload.get(self.key_last, pending_i)
+                return self.predicate(last_i, new_i)
+        else:
+            predicate_wrap = None
 
-        def interval_merge_op_1(pending_i, new_i):
+        if self.distance:
+            def distance_wrap(pending_i, new_i):
+                last_i = pending_i.payload.get(self.key_last, pending_i)
+                return self.distance(last_i, new_i)
+        else:
+            distance_wrap = None
+                
+        def interval_merge_op_wrap(pending_i, new_i):
             if self.interval_merge_op:
                 merged_i = self.interval_merge_op(pending_i, new_i)
             else:
@@ -471,10 +491,11 @@ class CoalesceByLast(Graph):
             return i
 
         coalesced_stream = Coalesce(
-            predicate=predicate_1,
+            predicate=predicate_wrap,
             epsilon=self.epsilon,
             axis=self.axis,
-            interval_merge_op=interval_merge_op_1
+            interval_merge_op=interval_merge_op_wrap,
+            distance=distance_wrap
         )(instream)
         removed_key_stream = Map(remove_key_last)(coalesced_stream)
         return removed_key_stream
