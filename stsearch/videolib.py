@@ -151,7 +151,7 @@ class LocalVideoDecoder(AbstractVideoDecoder):
         self.lock = threading.Lock()
 
     def get_frame(self, frame_id):
-        assert frame_id < self.frame_count, "Frame id out of bound %d" % self.frame_count
+        assert frame_id < self.frame_count, f"Frame id {frame_id} out of bound {self.frame_count}" 
         with self.lock:
             if frame_id > self.pos_frame:
                 # future frame: do sequential decode

@@ -6,7 +6,7 @@ from logzero import logger
 import numpy as np
 
 from rekall.bounds import Bounds3D
-from rekall.predicates import _area, _height, _width, iou_at_least, overlaps_before
+from rekall.predicates import _area, _height, _width, meets_before, iou_at_least, overlaps_before
 
 from stsearch.cvlib import Detection, DetectionFilter, DetectionFilterFlatten
 from stsearch.interval import *
@@ -50,7 +50,7 @@ class TrackFromBounds(Op):
         tracker.init(init_frame, tuple(init_box))
 
         # iterate frames and update tracker, get tracked result
-        for ts in range(int(i1['t1']+1), int(i1['t1']+self.window)):
+        for ts in range(int(i1['t1']+1), min(int(i1['t1']+self.window), int(self.decoder.frame_count))):
             next_frame = self.decoder.get_frame(ts)
             (success, next_box) = tracker.update(next_frame)
             if success:
@@ -83,8 +83,7 @@ if __name__ == "__main__":
     track_person_trajectories = TrackFromBounds(LocalVideoDecoder(INPUT_NAME), detect_every+1)(crop_persons)
 
     def trajectory_merge_predicate(i1, i2):
-        return i1['t1'] < i2['t1'] \
-            and i1['t2'] >= i2['t1'] - 2 \
+        return meets_before(1)(i1, i2) \
             and iou_at_least(0.5)(i1.payload['trajectory'][-1], i2.payload['trajectory'][0])
 
     def trajectory_payload_merge_op(p1, p2):

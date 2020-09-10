@@ -36,15 +36,13 @@ if __name__ == "__main__":
     # hasher = cv2.img_hash.MarrHildrethHash_create()
     # hasher = cv2.img_hash.BlockMeanHash_create(cv2.img_hash.BLOCK_MEAN_HASH_MODE_0)
 
-    def hash_map_fn(intrvl):
-        h = hasher.compute(intrvl.rgb)
-        intrvl.payload['hash'] = h
-        return intrvl
-
-    persons_with_hash = Map(hash_map_fn, name="image-hash")(crop_persons)
+    def get_hash(intrvl):
+        if 'img-hash' not in intrvl.payload:
+            intrvl.payload['img-hash'] = hasher.compute(intrvl.rgb)
+        return intrvl.payload['img-hash']
 
     def coalesce_predicate(i1, i2):
-        hdiff = hasher.compare(i1.payload['hash'], i2.payload['hash']) 
+        hdiff = hasher.compare(get_hash(i1), get_hash(i2)) 
         L2 = np.linalg.norm(centroid(i1) - centroid(i2))
         return before(1)(i1, i2)  \
             and 0.5 <= _area(i1) / _area(i2) <= 2 \
@@ -52,8 +50,9 @@ if __name__ == "__main__":
             and L2 < _height(i1)
 
     def coalesec_distance(i1, i2):
-        hdiff = hasher.compare(i1.payload['hash'], i2.payload['hash']) 
-        return hdiff
+        hdiff = hasher.compare(get_hash(i1), get_hash(i2)) 
+        L2 = np.linalg.norm(centroid(i1) - centroid(i2))
+        return (hdiff, L2)
 
     def coalesce_interval_merge_op(i1, i2):
         new_bounds = i1.bounds.span(i2)
@@ -66,15 +65,15 @@ if __name__ == "__main__":
 
         return Interval(new_bounds, new_payload)
 
-    tracked_persons = CoalesceByLast(
+    coalesced_persons = CoalesceByLast(
         predicate=coalesce_predicate,
         epsilon=detect_every*2,
         interval_merge_op=coalesce_interval_merge_op,
-        distance=coalesec_distance)(persons_with_hash)
+        distance=coalesec_distance)(crop_persons)
 
     long_coalesced_persons = Filter(
         pred_fn=lambda intrvl: intrvl.bounds.length() >= fps * 5
-    )(tracked_persons)
+    )(coalesced_persons)
 
     raw_fg = LocalVideoCropFrameGroup(INPUT_NAME, copy_payload=True)(long_coalesced_persons)
 

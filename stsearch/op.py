@@ -383,23 +383,24 @@ class Coalesce(Op):
 
             #if current_intrvls is empty, we need to start constructing a new set of pending intervals
             if len(current_intrvls) == 0:
-                current_intrvls.append(intrvl.copy())
+                current_intrvls.append(intrvl)
                 self.publishable_coalesced_intrvls = sorted(new_coalesced_intrvls)
                 self.pending_coalesced_intrvls = sorted(current_intrvls)
                 continue
             
             matched_intrvl = None
-            min_dist = float('inf')
+            min_dist = None
             loc = None
             for index, cur in enumerate(current_intrvls):
                 if predicate(cur, intrvl):
                     d = distance(cur, intrvl)
-                    if d < min_dist:
+                    if min_dist is None or d < min_dist:
+                        # update winner
                         matched_intrvl = cur
                         loc = index
                         min_dist = d 
 
-            #if no matching interval is found, this implies that intrvl should be the start of a new coalescing interval
+            # if no matching interval is found, this implies that intrvl should be the start of a new coalescing interval
             if matched_intrvl is None:
                 current_intrvls.append(intrvl)
             else:
@@ -480,6 +481,7 @@ class CoalesceByLast(Graph):
                     self.payload_merge_op(pending_i.payload, new_i.payload)
                 )
             # crucial: track the last merged interval
+            # FIXME: this doesn't track the first interval
             merged_i.payload[self.key_last] = new_i
             return merged_i
 
