@@ -73,14 +73,14 @@ if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     fps = 15
-    detect_every = 15
+    detect_every = 8
     
     all_frames = LocalVideoToFrames(INPUT_NAME)()
     sampled_frames = Slice(step=detect_every)(all_frames)
     detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
     crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
 
-    track_person_trajectories = TrackFromBounds(LocalVideoDecoder(INPUT_NAME), detect_every+1)(crop_persons)
+    track_person_trajectories = TrackFromBounds(LRULocalVideoDecoder(INPUT_NAME), detect_every+1)(crop_persons)
 
     def trajectory_merge_predicate(i1, i2):
         return meets_before(1)(i1, i2) \
@@ -142,5 +142,8 @@ if __name__ == "__main__":
         intrvl.savevideo(out_name, fps=fps)
         logger.debug(f"saved {out_name}")
 
-    logger.info("""You should find cropped .mp4 videos that 'bounds' a moving person. 
-        We use trackers from OpenCV.""")
+    logger.info(
+        "You should find cropped .mp4 videos that 'bounds' a moving person."
+        " We use trackers from OpenCV."
+        " The trajectory is visualized."
+    )

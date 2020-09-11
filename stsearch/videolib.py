@@ -1,3 +1,4 @@
+import functools
 import os
 import tempfile
 import threading
@@ -173,16 +174,29 @@ class LocalVideoDecoder(AbstractVideoDecoder):
     def __del__(self):
         self.cap.release()
 
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.path})"
 
-class LocalVideoToFrames(Op):
+
+class LRULocalVideoDecoder(LocalVideoDecoder):
+
+    def __init__(self, path, cache_size=32):
+        super().__init__(path)
+        self.cache_size = cache_size
+        self.get_frame = functools.lru_cache(maxsize=cache_size)(super().get_frame)
+
+
+
+class VideoToFrames(Op):
     
-    def __init__(self, path):
-        super().__init__()
-        self.decoder = LocalVideoDecoder(path)
+    def __init__(self, decoder, name=None):
+        super().__init__(name or f"{self.__class__.__name__}({str(decoder)})")
+        assert isinstance(decoder, AbstractVideoDecoder)
+        self.decoder = decoder
         self.next_frame_id = 0
 
     def call(self):
-        # not input
+        # no input
         pass
 
     def execute(self):
@@ -196,6 +210,11 @@ class LocalVideoToFrames(Op):
             return True
         else:
             return False
+
+class LocalVideoToFrames(VideoToFrames):
+    
+    def __init__(self, path, cache_size=0):
+        super().__init__(LocalVideoDecoder(path) if not cache_size else LRULocalVideoDecoder(path, cache_size))
 
 
 class LocalVideoCropFrameGroup(Graph):
@@ -241,13 +260,3 @@ class Crop(Graph):
 
         return Map(map_fn)(instream)
 
-
-# class VisualizeOnRoot(Graph):
-
-#     def __init__(self):
-#         super().__init__()
-
-#     def call(self, instream):
-#         def map_fn(ii):
-#             assert isinstance(ii, ImageInterval)
-#             new_ii = ImageInterval(ii.bounds.copy())
