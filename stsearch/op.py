@@ -29,7 +29,7 @@ class Graph(object):
     def __call__(self, *args, **kwargs):
         # traverse all args, check type
         for a in list(args) + list(kwargs.values()):
-            assert isinstance(a, IntervalStream), "Should only pass IntervalStream into call()"
+            assert isinstance(a, IntervalStream), f"Should only pass IntervalStream into call(). Got {str(type(a))}"
 
         return self.call(*args, **kwargs)
 

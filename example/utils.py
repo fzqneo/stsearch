@@ -16,7 +16,8 @@ class VisualizeTrajectoryOnFrameGroup(Graph):
         tkey = self.trajectory_key
 
         def visualize_map_fn(intrvl):
-            assert tkey in intrvl.payload
+            assert isinstance(intrvl, FrameGroupInterval)
+            assert tkey in intrvl.payload, f"{tkey} not found in {str(intrvl)}"
             pts = np.array(list(map(centroid, intrvl.payload[tkey])))
             assert pts.shape[1] == 2
             # this is tricky: adjust from relative coord in original frame to pixel coord in the crop
@@ -27,7 +28,6 @@ class VisualizeTrajectoryOnFrameGroup(Graph):
             thickness = 2
             is_closed = False
 
-            new_fg = FrameGroupInterval(intrvl.bounds.copy())
             new_frames = []
 
             for fid, frame in enumerate(intrvl.frames):
@@ -40,7 +40,7 @@ class VisualizeTrajectoryOnFrameGroup(Graph):
                     f1 = cv2.putText(f1, str(j), tuple(p1), cv2.FONT_HERSHEY_SIMPLEX, 0.2, (0,0,255), 1, cv2.LINE_AA)
                 new_frames.append(f1)
 
-            new_fg.frames = new_frames
-            return new_fg
+            intrvl.frames = new_frames
+            return intrvl
 
         return Map(map_fn=visualize_map_fn)(instream)
