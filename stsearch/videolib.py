@@ -19,8 +19,8 @@ FRAMEGROUP_KEY = '_frames'  # a list of numpy array
 
 class ImageInterval(Interval):
 
-    def __init__(self, bounds, root=None):
-        super().__init__(bounds)
+    def __init__(self, bounds, payload=None, root=None):
+        super().__init__(bounds, payload=payload)
         self.root = root or self
 
     @property
@@ -65,11 +65,16 @@ class ImageInterval(Interval):
     def savefile(self, path):
         cv2.imwrite(path, cv2.cvtColor(self.rgb, cv2.COLOR_RGB2BGR))
 
+    def copy(self):
+        return ImageInterval(
+            self.bounds.copy(),
+            payload=self.payload.copy(),
+            root=self.root if self.root is not self else None) 
 
 class VideoFrameInterval(ImageInterval):
 
-    def __init__(self, bounds, root_decoder=None):
-        super().__init__(bounds, root=self)
+    def __init__(self, bounds, payload=None, root_decoder=None):
+        super().__init__(bounds, payload=payload, root=self)
         self.root_decoder = root_decoder
         assert isinstance(root_decoder, AbstractVideoDecoder)
 
@@ -82,6 +87,13 @@ class VideoFrameInterval(ImageInterval):
     @rgb.setter 
     def rgb(self, val):
         self.payload[RGB_KEY] = np.array(val)
+
+    def copy(self):
+        return VideoFrameInterval(
+            bounds=self.bounds.copy(),
+            payload=self.payload.copy(),
+            root_decoder=self.root_decoder
+        )
 
 
 class FrameGroupInterval(Interval):
@@ -121,6 +133,7 @@ class FrameGroupInterval(Interval):
             data = f2.read()
         os.unlink(f.name)
         return data
+
 
 class AbstractVideoDecoder(object):
     def __init__(self):
@@ -185,8 +198,6 @@ class LRULocalVideoDecoder(LocalVideoDecoder):
         self.cache_size = cache_size
         self.get_frame = functools.lru_cache(maxsize=cache_size)(super().get_frame)
 
-
-
 class VideoToFrames(Op):
     
     def __init__(self, decoder, name=None):
@@ -211,15 +222,11 @@ class VideoToFrames(Op):
         else:
             return False
 
-class LocalVideoToFrames(VideoToFrames):
-    
-    def __init__(self, path, cache_size=0):
-        super().__init__(LocalVideoDecoder(path) if not cache_size else LRULocalVideoDecoder(path, cache_size))
 
-
-class LocalVideoCropFrameGroup(Graph):
-    def __init__(self, path, copy_payload=True):
-        self.decoder = LocalVideoDecoder(path)
+class VideoCropFrameGroup(Graph):
+    def __init__(self, decoder, copy_payload=True):
+        assert isinstance(decoder, AbstractVideoDecoder)
+        self.decoder = decoder
         self.copy_payload = copy_payload
 
     def call(self, instream):

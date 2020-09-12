@@ -14,6 +14,8 @@ from stsearch.op import *
 from stsearch.utils import run_to_finish
 from stsearch.videolib import *
 
+from utils import VisualizeTrajectoryOnFrameGroup
+
 INPUT_NAME = "example.mp4"
 OUTPUT_DIR = Path(__file__).stem + "_output"
 
@@ -75,7 +77,7 @@ if __name__ == "__main__":
     fps = 15
     detect_every = 8
     
-    all_frames = LocalVideoToFrames(INPUT_NAME)()
+    all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
     sampled_frames = Slice(step=detect_every)(all_frames)
     detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
     crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
@@ -83,7 +85,7 @@ if __name__ == "__main__":
     track_person_trajectories = TrackFromBounds(LRULocalVideoDecoder(INPUT_NAME), detect_every+1)(crop_persons)
 
     def trajectory_merge_predicate(i1, i2):
-        return meets_before(1)(i1, i2) \
+        return meets_before(3)(i1, i2) \
             and iou_at_least(0.5)(i1.payload['trajectory'][-1], i2.payload['trajectory'][0])
 
     def trajectory_payload_merge_op(p1, p2):
@@ -101,38 +103,11 @@ if __name__ == "__main__":
         pred_fn=lambda intrvl: intrvl.bounds.length() >= fps * 5
     )(coalesced_trajectories)
 
-    raw_fg = LocalVideoCropFrameGroup(INPUT_NAME, copy_payload=True)(long_coalesced_persons)
+    raw_fg = VideoCropFrameGroup(LRULocalVideoDecoder(INPUT_NAME), copy_payload=True)(long_coalesced_persons)
 
-    def visualize_map_fn(fg):
-        pts = np.array([centroid(intrvl) for intrvl in fg.payload['trajectory']])
-        assert pts.shape[1] == 2
-        # this is tricky: adjust from relative coord in original frame to pixel coord in the crop
-        pts =   (pts - [fg['x1'], fg['y1']]) / [_width(fg), _height(fg)] *  [fg.frames[0].shape[1], fg.frames[0].shape[0]]
-        pts = pts.astype(np.int32)
+    visualize_fg = VisualizeTrajectoryOnFrameGroup('trajectory')(raw_fg)
 
-        color = (0, 255, 0)
-        thickness = 2
-        is_closed = False
-
-        new_fg = FrameGroupInterval(fg.bounds)
-        new_frames = []
-
-        for fid, frame in enumerate(fg.frames):
-            frame = frame.copy()
-            f1 = cv2.putText(frame, f"visualize-{fid}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
-            # somehow polylines doesn't work
-            # f1 = cv2.polylines(f1, pts, is_closed, color, thickness)
-            for j, (p1, p2) in enumerate(zip(pts[:-1], pts[1:])):
-                f1 = cv2.line(f1, tuple(p1), tuple(p2), color, thickness)
-                f1 = cv2.putText(f1, str(j), tuple(p1), cv2.FONT_HERSHEY_SIMPLEX, 0.2, (0,0,255), 1, cv2.LINE_AA)
-            new_frames.append(f1)
-
-        new_fg.frames = new_frames
-        return new_fg
-
-    visualization = Map(map_fn=visualize_map_fn)(raw_fg)
-
-    output = visualization
+    output = visualize_fg
     output_sub = output.subscribe()
     output.start_thread_recursive()
 
