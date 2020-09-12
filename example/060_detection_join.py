@@ -21,7 +21,7 @@ if __name__ == "__main__":
     fps = 15
     sample_every = 3
     
-    all_frames = LocalVideoToFrames(INPUT_NAME)()
+    all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
     sampled_frames = Slice(step=sample_every)(all_frames)
     detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
 

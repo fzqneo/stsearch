@@ -16,7 +16,7 @@ def query(path, session, *args, **kwargs):
     session.log('error', "Enter query fn")
     rv = []
 
-    all_frames = LocalVideoToFrames(path)()
+    all_frames = VideoToFrames(LocalVideoDecoder(path))()
     sampled_frames = Slice(step=30, end=1800)(all_frames)
     detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
     person_detections = DetectionFilterFlatten(['bus'], 0.3)(detections)

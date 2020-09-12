@@ -15,7 +15,7 @@ OUTPUT_DIR = Path(__file__).stem + "_output"
 if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    all_frames = LocalVideoToFrames(INPUT_NAME)()
+    all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
     sampled_frames = Slice(step=30, end=1800)(all_frames)
     detections = Detection(
         'cloudlet031.elijah.cs.cmu.edu', 

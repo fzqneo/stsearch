@@ -14,7 +14,7 @@ if __name__ == "__main__":
     
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    all_frames = LocalVideoToFrames(INPUT_NAME)()
+    all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
     sampled_frames = Slice(start=0, step=30, end=900)(all_frames)
     cropped_frames = Crop(x1=.25, x2=.5, y1=.25, y2=.75)(sampled_frames)
     

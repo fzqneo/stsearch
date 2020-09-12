@@ -6,7 +6,9 @@ from stsearch.videolib import *
 
 if __name__ == "__main__":
     
-    all_frames = LocalVideoToFrames("FifthCraig_sample_1.mp4")()
+    path = "example.mp4"
+    all_frames = VideoToFrames(LocalVideoDecoder(path))()
+
     sampled_frames = Slice(step=15)(all_frames)
     detections = Detection('cloudlet015.elijah.cs.cmu.edu', 5000)(sampled_frames)
     vis_frames = DetectionVisualize(['person'], 0.3)(detections)

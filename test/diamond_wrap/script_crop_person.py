@@ -7,7 +7,7 @@ from stsearch.videolib import *
 def query(path):
     rv = []
 
-    all_frames = LocalVideoToFrames(path)()
+    all_frames = VideoToFrames(LocalVideoDecoder(path))()
     sampled_frames = Slice(step=30, end=300)(all_frames)
     detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
     person_detections = DetectionFilterFlatten(['person'], 0.3)(detections)
