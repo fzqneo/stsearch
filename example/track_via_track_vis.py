@@ -41,6 +41,8 @@ class TrackFromBounds(Op):
             return False
         
         tracker = cv2.TrackerCSRT_create()
+        # tracker = cv2.TrackerKCF_create()
+
         ret_bounds = i1.bounds
         ret_payload = {'trajectory': [VideoFrameInterval(i1.bounds, root_decoder=self.decoder), ]}
 

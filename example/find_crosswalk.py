@@ -1,9 +1,11 @@
 import os
 from pathlib import Path
+from typing import List
 
 import cv2
 from logzero import logger
 import numpy as np
+from numpy.linalg import norm
 
 from rekall.bounds import Bounds3D
 from rekall.bounds.utils import bounds_intersect, bounds_span
@@ -21,6 +23,24 @@ from utils import VisualizeTrajectoryOnFrameGroup
 INPUT_NAME = "example.mp4"
 OUTPUT_DIR = Path(__file__).stem + "_output"
 
+def traj_get_xy_array(L: List[Interval]) -> np.ndarray :
+    return np.array([centroid(i) for i in L])
+
+def linearize(pts, window=10):
+    # simplify a trajectory (a list of x,y) into a line segment with two end points
+    return np.mean(pts[:window, :], axis=0), np.mean(pts[-window:, :], axis=0)
+
+def separate(a1, a2, b1, b2):
+    # test if line (a1, a2) separate b1 and b2 into two sides
+    # algorithm: use a1 as origin. dap = the normal vector of a
+    # check whether b1 and b2 project to +/- sides of dap.
+    da = a2 - a1
+    dap = np.array([-da[1], da[0]])
+    return np.dot(dap, b1-a1)*np.dot(dap, b2-a1) < 0
+
+def seg_intersect(a1, a2, b1, b2):
+    # note: this is segmenti intersect, not line intersect
+    return separate(a1, a2, b1, b2) and separate(b1, b2, a1, a2)  
 
 def traj_concatable(epsilon, iou_thres, key='trajectory'):
     """Returns a predicate function that tests whether two trajectories
@@ -47,10 +67,17 @@ def traj_concat_payload(key):
     return new_payload_op
 
 
-def is_crosswalk(key1='traj_person', key2='traj_car'):
+def is_crosswalk(key1='traj_person', key2='traj_car', degree=30):
 
     def new_pred(i1: Interval, i2: Interval) -> bool:
-        return iou_at_least(0.1)(i1, i2)
+        line1 = linearize(traj_get_xy_array(i1.payload[key1]))
+        line2 = linearize(traj_get_xy_array(i2.payload[key2]))
+
+        vec1 = line1[0] - line1[1]
+        vec2 = line2[0] - line2[1]
+
+        return seg_intersect(line1[0], line1[1], line2[0], line2[1]) \
+            and np.arccos(abs(np.dot(vec1, vec2) / norm(vec1) / norm(vec2))) >= np.pi * degree/180
 
     return new_pred
 
@@ -66,47 +93,6 @@ def crosswalk_merge(key1='traj_person', key2='traj_car'):
         return Interval(new_bounds, new_payload)
 
     return new_interval_merge_op
-
-
-def is_pair(corrcoef=.8, trajectory_key='trajectory'):
-
-    def new_pred(i1: Interval, i2: Interval) -> bool:
-        assert trajectory_key in i1.payload
-        assert trajectory_key in i2.payload
-
-        if not id(i1) < id(i2) \
-            or not same_time(75)(i1, i2) \
-            or not iou_at_least(0.5)(i1, i2):
-            return False
-
-        logger.debug("checking trajecory corr")
-
-        def get_txy(i):
-            # returns .shape=(n, 3). Each row is (t, x, y)
-            return np.array([ [j['t1'],] + list(centroid(j)) for j in i.payload[trajectory_key]] )
-
-        txy_1, txy_2 = get_txy(i1), get_txy(i2)
-
-        ts = txy_1[:, 0]    # use 1's time as reference
-        txy_2 = np.stack((ts, np.interp(ts, txy_2[:, 0], txy_2[:, 1]), np.interp(ts, txy_2[:, 0], txy_2[:, 2])), axis=1)
-        # logger.debug(f"txy_1={txy_1}\ntxy_2={txy_2}")
-        corr_x = np.corrcoef(txy_1[:, 1], txy_2[:, 1])[0 ,1]
-        corr_y = np.corrcoef(txy_1[:, 2], txy_2[:, 2])[0, 1]
-        logger.debug(f"corr_x={corr_x}, corr_y={corr_y}")
-        return corr_x >= corrcoef and corr_y >= corrcoef
-
-    return new_pred
-
-def pair_merge_op(i1: Interval, i2: Interval) -> Interval:
-    new_bounds = i1.bounds.span(i2.bounds)
-    new_payload = {
-        'trajectory_1': i1.payload['trajectory'],
-        'trajectory_2': i2.payload['trajectory']
-    }
-
-    ret = Interval(new_bounds, new_payload)
-    logger.debug(f"merged pair: {str(ret)}")
-    return ret
 
 
 class TrackFromBounds(Op):
@@ -126,7 +112,8 @@ class TrackFromBounds(Op):
         if i1 is None:
             return False
         
-        tracker = cv2.TrackerCSRT_create()
+        tracker = cv2.TrackerCSRT_create() # best accuracy but slow
+        # tracker = cv2.TrackerKCF_create()
         ret_bounds = i1.bounds
         ret_payload = {self.trajectory_key: [VideoFrameInterval(i1.bounds, root_decoder=self.decoder), ]}
 
@@ -223,5 +210,5 @@ if __name__ == "__main__":
         logger.debug(f"saved {out_name}")
 
     logger.info(
-        "This example tries to find a pair of people walking together."
+        "This example tries to find crosswalks by finding where human trajectories intersect with car trajectories."
     )
