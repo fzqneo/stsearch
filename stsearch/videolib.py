@@ -136,35 +136,51 @@ class FrameGroupInterval(Interval):
 
 
 class AbstractVideoDecoder(object):
-    def __init__(self):
+    def __init__(self, resize: typing.Union[None, int, typing.Sequence]=None):
         self.frame_count = None
         self.width = None
         self.height = None
+        self.resize = resize
 
     def get_frame(self, frame_id):
+        raw_frame = self.get_raw_frame(frame_id)
+        if not self.resize:
+            return raw_frame
+        else:
+            H, W = raw_frame.shape[:2]
+            if isinstance(self.resize, (int, float)):
+                sf = self.resize / max(H, W)
+                new_W, new_H = int(sf*W), int(sf*H)
+            else:
+                new_W, new_H = self.resize
+
+            return cv2.resize(raw_frame, (new_W, new_H))
+
+
+    def get_raw_frame(self, frame_id):
         raise NotImplementedError
 
 
 class LocalVideoDecoder(AbstractVideoDecoder):
-    def __init__(self, path):
-        super().__init__()
+    def __init__(self, path, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.path = path
         cap = cv2.VideoCapture(path)
         self.cap = cap
         try:
             self.frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-            self.width = cap.get(cv2.CAP_PROP_FRAME_WIDTH )
-            self.height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+            self.raw_width = cap.get(cv2.CAP_PROP_FRAME_WIDTH )
+            self.raw_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
         except AttributeError: # version difference
             self.frame_count = cap.get(cv2.CV_CAP_PROP_FRAME_COUNT)
-            self.width = cap.get(cv2.CV_CAP_PROP_FRAME_WIDTH )
-            self.height = cap.get(cv2.CV_CAP_PROP_FRAME_HEIGHT)
+            self.raw_width = cap.get(cv2.CV_CAP_PROP_FRAME_WIDTH )
+            self.raw_height = cap.get(cv2.CV_CAP_PROP_FRAME_HEIGHT)
             
         self.pos_frame = 0
 
         self.lock = threading.Lock()
 
-    def get_frame(self, frame_id):
+    def get_raw_frame(self, frame_id):
         assert frame_id < self.frame_count, f"Frame id {frame_id} out of bound {self.frame_count}" 
         with self.lock:
             if frame_id > self.pos_frame:
@@ -193,8 +209,8 @@ class LocalVideoDecoder(AbstractVideoDecoder):
 
 class LRULocalVideoDecoder(LocalVideoDecoder):
 
-    def __init__(self, path, cache_size=32):
-        super().__init__(path)
+    def __init__(self, path, cache_size=32, *args, **kwargs):
+        super().__init__(path, *args, **kwargs)
         self.cache_size = cache_size
         self.get_frame = functools.lru_cache(maxsize=cache_size)(super().get_frame)
 
@@ -231,16 +247,19 @@ class VideoCropFrameGroup(Graph):
 
     def call(self, instream):
         def map_fn(intrvl):
-            H, W = self.decoder.height, self.decoder.width
             if self.copy_payload:
                 fg = FrameGroupInterval(intrvl.bounds.copy(), intrvl.payload)
             else:
                 fg = FrameGroupInterval(intrvl.bounds.copy())
+
+            frame_0 = self.decoder.get_frame(intrvl['t1'])
+            H, W = frame_0.shape[:2]
+
             # convert relative coordinate to absolute
             X1, X2 = int(intrvl['x1'] * W), int(intrvl['x2'] * W)
             Y1, Y2 = int(intrvl['y1'] * H), int(intrvl['y2'] * H)
             logger.debug(f"3D cropping: {intrvl['t1'], intrvl['t2'], X1, X2, Y1, Y2}")
-            fg.frames = [
+            fg.frames =  [
                 self.decoder.get_frame(t1)[Y1:Y2, X1:X2, :]
                 for t1 in range(intrvl['t1'], intrvl['t2'])
             ]

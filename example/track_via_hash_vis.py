@@ -26,7 +26,7 @@ if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     fps = 15
-    detect_every = 3
+    detect_every = 2
     
     all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
     sampled_frames = Slice(step=detect_every)(all_frames)
@@ -77,39 +77,11 @@ if __name__ == "__main__":
         pred_fn=lambda intrvl: intrvl.bounds.length() >= fps * 5
     )(coalesced_persons)
 
-    raw_fg = LocalVideoCropFrameGroup(INPUT_NAME, copy_payload=True)(long_coalesced_persons)
+    raw_fg = VideoCropFrameGroup(LRULocalVideoDecoder(INPUT_NAME), copy_payload=True)(long_coalesced_persons)
 
-    def visualize_map_fn(fg):
-        pts = np.array([centroid(intrvl) for intrvl in fg.payload['trajectory']])
-        assert pts.shape[1] == 2
-        # this is tricky: adjust from relative coord in original frame to pixel coord in the crop
-        pts =   (pts - [fg['x1'], fg['y1']]) / [_width(fg), _height(fg)] *  [fg.frames[0].shape[1], fg.frames[0].shape[0]]
-        pts = pts.astype(np.int32)
+    visualize_fg = VisualizeTrajectoryOnFrameGroup('trajectory')(raw_fg)
 
-        color = (0, 255, 0)
-        thickness = 2
-        is_closed = False
-
-        new_fg = FrameGroupInterval(fg.bounds)
-        new_frames = []
-
-        for fid, frame in enumerate(fg.frames):
-            frame = frame.copy()
-            f1 = cv2.putText(frame, f"visualize-{fid}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
-            # somehow polylines doesn't work
-            # f1 = cv2.polylines(f1, pts, is_closed, color, thickness)
-            for j, (p1, p2) in enumerate(zip(pts[:-1], pts[1:])):
-                print("Drawing line", p1, p2)
-                f1 = cv2.line(f1, tuple(p1), tuple(p2), color, thickness)
-                f1 = cv2.putText(f1, str(j), tuple(p1), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,255), 1, cv2.LINE_AA)
-            new_frames.append(f1)
-
-        new_fg.frames = new_frames
-        return new_fg
-
-    visualization = Map(map_fn=visualize_map_fn)(raw_fg)
-
-    output = visualization
+    output = visualize_fg
     output_sub = output.subscribe()
     output.start_thread_recursive()
 

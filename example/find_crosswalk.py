@@ -9,7 +9,7 @@ from numpy.linalg import norm
 
 from rekall.bounds import Bounds3D
 from rekall.bounds.utils import bounds_intersect, bounds_span
-from rekall.predicates import _area, _height, _width, meets_before, iou_at_least, overlaps_before
+from rekall.predicates import _area, _height, _iou, _width, meets_before, iou_at_least, overlaps_before
 
 from stsearch.cvlib import Detection, DetectionFilter, DetectionFilterFlatten
 from stsearch.interval import *
@@ -20,7 +20,7 @@ from stsearch.videolib import *
 
 from utils import VisualizeTrajectoryOnFrameGroup
 
-INPUT_NAME = "example.mp4"
+INPUT_NAME = "example_2_min.mp4"
 OUTPUT_DIR = Path(__file__).stem + "_output"
 
 def traj_get_xy_array(L: List[Interval]) -> np.ndarray :
@@ -67,9 +67,12 @@ def traj_concat_payload(key):
     return new_payload_op
 
 
-def is_crosswalk(key1='traj_person', key2='traj_car', degree=30):
+def is_crosswalk(key1='traj_person', key2='traj_car', degree=50):
 
     def new_pred(i1: Interval, i2: Interval) -> bool:
+        if not 0.1 <= _iou(i1, i2) <= 0.6:  # hack
+            return False
+
         line1 = linearize(traj_get_xy_array(i1.payload[key1]))
         line2 = linearize(traj_get_xy_array(i2.payload[key2]))
 
@@ -80,6 +83,7 @@ def is_crosswalk(key1='traj_person', key2='traj_car', degree=30):
             and np.arccos(abs(np.dot(vec1, vec2) / norm(vec1) / norm(vec2))) >= np.pi * degree/180
 
     return new_pred
+
 
 def crosswalk_merge(key1='traj_person', key2='traj_car'):
 
@@ -97,11 +101,12 @@ def crosswalk_merge(key1='traj_person', key2='traj_car'):
 
 class TrackFromBounds(Op):
 
-    def __init__(self, decoder, window, trajectory_key='trajectory', name=None):
+    def __init__(self, decoder, window, step=1, trajectory_key='trajectory', name=None):
         super().__init__(name)
         assert isinstance(decoder, AbstractVideoDecoder)
         self.decoder = decoder
         self.window = window
+        self.step = step
         self.trajectory_key = trajectory_key
 
     def call(self, instream):
@@ -125,7 +130,7 @@ class TrackFromBounds(Op):
         tracker.init(init_frame, tuple(init_box))
 
         # iterate frames and update tracker, get tracked result
-        for ts in range(int(i1['t1']+1), min(int(i1['t1']+self.window), int(self.decoder.frame_count))):
+        for ts in range(int(i1['t1']+1), min(int(i1['t1']+self.window), int(self.decoder.frame_count)), int(self.step)):
             next_frame = self.decoder.get_frame(ts)
             (success, next_box) = tracker.update(next_frame)
             if success:
@@ -150,20 +155,22 @@ if __name__ == "__main__":
     fps = 15
     detect_every = 8
     
-    all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
+    all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME, resize=600))()
     sampled_frames = Slice(step=detect_every)(all_frames)
     detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
     crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
     crop_cars = DetectionFilterFlatten(['car'], 0.5)(detections)
     
     track_person_trajectories = TrackFromBounds(
-        LRULocalVideoDecoder(INPUT_NAME), 
+        LRULocalVideoDecoder(INPUT_NAME, resize=600), 
         detect_every+1, 
+        step=1,
         trajectory_key='traj_person')(crop_persons)
 
     track_car_trajectories = TrackFromBounds(
-        LRULocalVideoDecoder(INPUT_NAME), 
-        detect_every+1, 
+        LRULocalVideoDecoder(INPUT_NAME, resize=600), 
+        detect_every+1,
+        step=1,
         trajectory_key='traj_car')(crop_cars)
 
     merged_person_trajectories = CoalesceByLast(
@@ -191,10 +198,10 @@ if __name__ == "__main__":
     crosswalk_patches = JoinWithTimeWindow(
         predicate=is_crosswalk(),
         merge_op=crosswalk_merge('traj_person', 'traj_car'),
-        window=450
+        window=int(15*60*1.5)
     )(long_person_trajectories, long_car_trajectories)
 
-    raw_fg = VideoCropFrameGroup(LRULocalVideoDecoder(INPUT_NAME), copy_payload=True)(crosswalk_patches)
+    raw_fg = VideoCropFrameGroup(LRULocalVideoDecoder(INPUT_NAME, resize=600), copy_payload=True)(crosswalk_patches)
 
     visualize_fg = VisualizeTrajectoryOnFrameGroup('traj_person')(raw_fg)
     visualize_fg = VisualizeTrajectoryOnFrameGroup('traj_car')(visualize_fg)
@@ -203,7 +210,7 @@ if __name__ == "__main__":
     output_sub = output.subscribe()
     output.start_thread_recursive()
 
-    reference_frame = cv2.cvtColor(LocalVideoDecoder(INPUT_NAME).get_frame(10), cv2.COLOR_RGB2BGR)
+    reference_frame = cv2.cvtColor(LocalVideoDecoder(INPUT_NAME, resize=600).get_frame(10), cv2.COLOR_RGB2BGR)
 
     for k, intrvl in enumerate(output_sub):
         assert isinstance(intrvl, FrameGroupInterval)
@@ -217,8 +224,8 @@ if __name__ == "__main__":
         right, bottom = int(intrvl['x2'] * W), int(intrvl['y2'] * H)
         reference_frame = cv2.rectangle(reference_frame, (left, top), (right, bottom), (0, 255,0), 2)
 
+    cv2.imwrite(f"{OUTPUT_DIR}/crosswalk.jpg", reference_frame)
+
     logger.info(
         "This example tries to find crosswalks by finding where human trajectories intersect with car trajectories."
     )
-
-    cv2.imwrite(f"{OUTPUT_DIR}/crosswalk.jpg", reference_frame)
