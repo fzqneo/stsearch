@@ -203,12 +203,22 @@ if __name__ == "__main__":
     output_sub = output.subscribe()
     output.start_thread_recursive()
 
+    reference_frame = cv2.cvtColor(LocalVideoDecoder(INPUT_NAME).get_frame(10), cv2.COLOR_RGB2BGR)
+
     for k, intrvl in enumerate(output_sub):
         assert isinstance(intrvl, FrameGroupInterval)
         out_name = f"{OUTPUT_DIR}/{k}-{intrvl['t1']}-{intrvl['t2']}-{intrvl['x1']:.2f}-{intrvl['y1']:.2f}.mp4"
         intrvl.savevideo(out_name, fps=fps)
         logger.debug(f"saved {out_name}")
 
+        # visualize x,y on reference frame
+        H, W = reference_frame.shape[:2]
+        left, top = int(intrvl['x1'] * W), int(intrvl['y1'] * H)
+        right, bottom = int(intrvl['x2'] * W), int(intrvl['y2'] * H)
+        reference_frame = cv2.rectangle(reference_frame, (left, top), (right, bottom), (0, 255,0), 2)
+
     logger.info(
         "This example tries to find crosswalks by finding where human trajectories intersect with car trajectories."
     )
+
+    cv2.imwrite(f"{OUTPUT_DIR}/crosswalk.jpg", reference_frame)
