@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import find_packages, setup
 
 if __name__ == "__main__":
     setup(name='stsearch',
@@ -8,7 +8,7 @@ if __name__ == "__main__":
           author='Ziqiang Feng',
           author_email='zf@cs.cmu.edu',
           license='Apache 2.0',
-          packages=['stsearch', 'stsearch.diamond_wrap'],
+          packages=find_packages(include=['stsearch', 'stsearch.*']),
           install_requires=['rekallpy==0.3.2', 'logzero', 'numpy', 'opencv-contrib-python', 'python-constraint', 'tqdm', 'cloudpickle',
                             'urllib3', 'requests'],
           setup_requires=['pytest-runner'],

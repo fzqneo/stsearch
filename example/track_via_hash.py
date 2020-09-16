@@ -6,7 +6,7 @@ from logzero import logger
 import numpy as np
 
 from rekall.bounds import Bounds3D
-from rekall.predicates import _area, _height, _width, and_pred, before, iou_at_least
+from rekall.predicates import _area, _height, _iou, _width, and_pred, before, iou_at_least
 
 from stsearch.cvlib import Detection, DetectionFilter, DetectionFilterFlatten
 from stsearch.interval import *
@@ -52,9 +52,10 @@ if __name__ == "__main__":
             and L2 < _height(i1)
 
     def coalesec_distance(i1, i2):
+        iou = _iou(i1, i2)
         hdiff = hasher.compare(get_hash(i1), get_hash(i2)) 
         L2 = np.linalg.norm(centroid(i1) - centroid(i2))
-        return (hdiff, L2)
+        return (iou, L2, hdiff)
 
     def coalesce_interval_merge_op(i1, i2):
         new_bounds = i1.bounds.span(i2)
