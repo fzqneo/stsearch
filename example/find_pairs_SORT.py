@@ -8,7 +8,7 @@ import numpy as np
 from rekall.bounds import Bounds3D
 from rekall.predicates import _area, _height, _width, meets_before, iou_at_least, overlaps_before
 
-from stsearch.cvlib import Detection, DetectionFilterFlatten, TrackFromBox
+from stsearch.cvlib import Detection, SORTTrackFromDetection, get_SORT_input_from_detection
 from stsearch.interval import *
 from stsearch.op import *
 from stsearch.stdlib import centroid, same_time
@@ -20,7 +20,7 @@ from utils import VisualizeTrajectoryOnFrameGroup
 INPUT_NAME = "example.mp4"
 OUTPUT_DIR = Path(__file__).stem + "_output"
 
-def is_pair(corrcoef=.8, trajectory_key='trajectory'):
+def is_pair(corrcoef=.7, trajectory_key='trajectory'):
 
     def new_pred(i1: Interval, i2: Interval) -> bool:
         assert trajectory_key in i1.payload
@@ -28,7 +28,7 @@ def is_pair(corrcoef=.8, trajectory_key='trajectory'):
 
         if not id(i1) < id(i2) \
             or not same_time(75)(i1, i2) \
-            or not iou_at_least(0.5)(i1, i2):
+            or not iou_at_least(0.3)(i1, i2):
             return False
 
         logger.debug("checking trajecory corr")
@@ -41,7 +41,7 @@ def is_pair(corrcoef=.8, trajectory_key='trajectory'):
 
         ts = txy_1[:, 0]    # use 1's time as reference
         txy_2 = np.stack((ts, np.interp(ts, txy_2[:, 0], txy_2[:, 1]), np.interp(ts, txy_2[:, 0], txy_2[:, 2])), axis=1)
-        # logger.debug(f"txy_1={txy_1}\ntxy_2={txy_2}")
+        logger.debug(f"txy_1={txy_1}\ntxy_2={txy_2}")
         corr_x = np.corrcoef(txy_1[:, 1], txy_2[:, 1])[0 ,1]
         corr_y = np.corrcoef(txy_1[:, 2], txy_2[:, 2])[0, 1]
         logger.debug(f"corr_x={corr_x}, corr_y={corr_y}")
@@ -65,39 +65,40 @@ if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     fps = 15
-    detect_every = 8
+    detect_every = 2
     
     all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
     sampled_frames = Slice(step=detect_every)(all_frames)
     detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5002)(sampled_frames)
-    crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
 
-    track_person_trajectories = TrackFromBox(LRULocalVideoDecoder(INPUT_NAME), detect_every+1)(crop_persons)
+    short_trajectories = SORTTrackFromDetection(
+        get_input_fn=get_SORT_input_from_detection(['person'], 0.3),
+        window=fps*30,
+        trajectory_key='trajectory',
+        max_age=7,
+        iou_threshold=0.01
+    )(detections)
 
     def trajectory_merge_predicate(i1, i2):
         return meets_before(3)(i1, i2) \
-            and iou_at_least(0.5)(i1.payload['trajectory'][-1], i2.payload['trajectory'][0])
+            and iou_at_least(0.3)(i1.payload['trajectory'][-1], i2.payload['trajectory'][0])
 
     def trajectory_payload_merge_op(p1, p2):
-        logger.debug(f"Merging two trajectories of lengths {len(p1['trajectory'])} and {len(p2['trajectory'])}")
+        print(f"Merging two trajectories of lengths {len(p1['trajectory'])} and {len(p2['trajectory'])}")
         return {'trajectory': p1['trajectory'] + p2['trajectory']}
 
-    coalesced_trajectories = CoalesceByLast(
+    long_trajectories = Coalesce(
         predicate=trajectory_merge_predicate,
         bounds_merge_op=Bounds3D.span,
         payload_merge_op=trajectory_payload_merge_op,
         epsilon=1.1*detect_every
-    )(track_person_trajectories)
-
-    long_coalesced_persons = Filter(
-        pred_fn=lambda intrvl: intrvl.bounds.length() >= fps * 5
-    )(coalesced_trajectories)
+    )(short_trajectories)
 
     pairs = JoinWithTimeWindow(
         predicate=is_pair(),
         merge_op=pair_merge_op,
         window=150
-    )(long_coalesced_persons, long_coalesced_persons)
+    )(long_trajectories, long_trajectories)
 
     raw_fg = VideoCropFrameGroup(LRULocalVideoDecoder(INPUT_NAME), copy_payload=True)(pairs)
 

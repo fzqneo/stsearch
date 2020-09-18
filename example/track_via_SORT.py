@@ -28,12 +28,13 @@ if __name__ == "__main__":
     
     all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
     sampled_frames = Slice(step=detect_every)(all_frames)
-    detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
+    detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5002)(sampled_frames)
 
     short_trajectories = SORTTrackFromDetection(
         get_input_fn=get_SORT_input_from_detection(['person'], 0.3),
         window=fps*30,
         trajectory_key='trajectory',
+        max_age=7,
         iou_threshold=0.01
     )(detections)
 
