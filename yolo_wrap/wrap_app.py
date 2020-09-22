@@ -1,4 +1,3 @@
-# https://github.com/johannestang/yolo_service/blob/master/examples/examples_detect.py
 # https://github.com/johannestang/yolo_service
 
 import io

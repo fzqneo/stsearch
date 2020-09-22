@@ -20,7 +20,7 @@ from stsearch.videolib import *
 
 from utils import VisualizeTrajectoryOnFrameGroup
 
-INPUT_NAME = "example_2_min.mp4"
+INPUT_NAME = "example.mp4"
 OUTPUT_DIR = Path(__file__).stem + "_output"
 
 def traj_get_xy_array(L: List[Interval]) -> np.ndarray :
