@@ -8,6 +8,7 @@ from rekall.predicates import _iou, and_pred, before, iou_at_least
 
 from stsearch.interval import *
 from stsearch.op import *
+from stsearch.parallel import ParallelMap
 
 logger.setLevel(logging.INFO)
 
@@ -635,3 +636,19 @@ class TestAntiJoinWithTimeWindow(OpTestCase):
 
         results = run_to_finish(output)
         self.assertIntervalListEq(results, target)
+
+
+class TestParallelMap(OpTestCase):
+    
+    def test_parallel_map_payload(self):
+        map_fn = lambda intrvl: Interval(
+            intrvl.bounds.copy(),
+            {'msg': intrvl.payload['msg'] + " bravo!"}
+        )
+
+        output = ParallelMap(map_fn, 4)(FromIterable(create_intrvl_list_hello())())
+        results = run_to_finish(output)
+        self.assertListEqual(
+            [intrvl.payload['msg'] for intrvl in results],
+            ["hello bravo!", "world bravo!", "hello world bravo!"]
+        )

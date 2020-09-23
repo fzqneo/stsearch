@@ -11,6 +11,7 @@ from rekall.predicates import _height, _iou, _width
 from stsearch import Graph, Interval, Op
 from stsearch.cvlib.detection import DEFAULT_DETECTION_KEY
 from stsearch.op import Map
+from stsearch.parallel import ParallelMap
 from stsearch.third_party.sorttrack.sort import Sort as SORTTrack
 from stsearch.videolib import AbstractVideoDecoder, VideoFrameInterval
 
@@ -52,7 +53,7 @@ def _cv2_track_from_box(decoder, window, step, trajectory_key) -> typing.Callabl
 
 class TrackFromBox(Graph):
 
-    def __init__(self, decoder, window, step=1, trajectory_key='trajectory', name=None):
+    def __init__(self, decoder, window, step=1, trajectory_key='trajectory', name=None, parallel_workers=1):
         super().__init__()
         assert isinstance(decoder, AbstractVideoDecoder)
         self.decoder = decoder
@@ -60,12 +61,21 @@ class TrackFromBox(Graph):
         self.step = step
         self.trajectory_key = trajectory_key
         self.name = name
+        self.parallel_workers = parallel_workers
 
     def call(self, instream):
-        return Map(
-            map_fn=_cv2_track_from_box(self.decoder, self.window, self.step, self.trajectory_key),
-            name=f"{self.__class__.__name__}:{self.name}"
-        )(instream)
+        if self.parallel_workers == 1:
+            return Map(
+                map_fn=_cv2_track_from_box(self.decoder, self.window, self.step, self.trajectory_key),
+                name=f"{self.__class__.__name__}:{self.name}"
+            )(instream)
+        else:
+            return ParallelMap(
+                map_fn=_cv2_track_from_box(self.decoder, self.window, self.step, self.trajectory_key),
+                name=f"{self.__class__.__name__}:{self.name}",
+                max_workers=self.parallel_workers
+            )(instream)
+
 
 
 def get_SORT_input_from_detection(

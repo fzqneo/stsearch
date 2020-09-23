@@ -22,12 +22,14 @@ class Detection(Graph):
         self, 
         server='localhost', port=5000, 
         server_list: Optional[Iterable[str]]=None,
-        result_key=DEFAULT_DETECTION_KEY):
+        result_key=DEFAULT_DETECTION_KEY,
+        name=None):
 
         super().__init__()
 
         self.server_list = list(server_list or [f"{server}:{port}", ])
         self.result_key = result_key
+        self.name = name
 
 
     def call(self, instream):
@@ -49,7 +51,7 @@ class Detection(Graph):
             
             return intrvl
 
-        return Map(map_fn)(instream)
+        return Map(map_fn, name=f"{self.__class__.__name__}:{self.name}")(instream)
 
     
 class DetectionVisualize(Graph):

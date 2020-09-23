@@ -101,12 +101,13 @@ class Op(object):
         while self.execute():
             pass
         self.publish(None)
+        logger.info(f"{self.name} terminating loop.")
 
     def start_thread(self):
         if not self.started:
             t = threading.Thread(target=self.loop_execute, name=f"op-thread-{self.name}", daemon=True)
             t.start()
-            logger.debug(f"Started operator thread {t.name}")
+            logger.info(f"Started operator thread {t.name}")
             self.started = True
 
     def start_thread_recursive(self):
