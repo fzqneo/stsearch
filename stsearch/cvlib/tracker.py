@@ -28,7 +28,7 @@ def _cv2_track_from_box(decoder, window, step, trajectory_key) -> typing.Callabl
         # buffer all frames in window at once
         start_fid = min(i1['t1'], decoder.frame_count - 1)  # inclusive
         end_fid = min(i1['t1'] + window, decoder.frame_count)  # exclusive
-        frames_to_track = [decoder.get_frame(fid) for fid in range(start_fid, end_fid)]
+        frames_to_track = decoder.get_frame_interval(start_fid, end_fid, step)
 
         # init tracker. For tracking, we must get whole frames
         H, W = frames_to_track[0].shape[:2]
@@ -37,8 +37,7 @@ def _cv2_track_from_box(decoder, window, step, trajectory_key) -> typing.Callabl
         tracker.init(frames_to_track[0], tuple(init_box))
 
         # iterate remaining frames and update tracker, get tracked result
-        for ts, next_frame in zip(range(start_fid+1, end_fid, step), frames_to_track[1::step]):
-            next_frame = decoder.get_frame(ts)
+        for ts, next_frame in zip(range(start_fid+step, end_fid, step), frames_to_track[1:]):
             (success, next_box) = tracker.update(next_frame)
 
             if success:

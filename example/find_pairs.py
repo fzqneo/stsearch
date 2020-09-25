@@ -18,12 +18,14 @@ from stsearch.videolib import *
 
 from utils import VisualizeTrajectoryOnFrameGroup
 
+
 logger.setLevel(logging.INFO)
+cv2.setNumThreads(4)
 
 INPUT_NAME = "example.mp4"
 OUTPUT_DIR = Path(__file__).stem + "_output"
 
-def is_pair(corrcoef=.8, trajectory_key='trajectory'):
+def is_pair(corrcoef=.9, trajectory_key='trajectory'):
 
     def new_pred(i1: Interval, i2: Interval) -> bool:
         assert trajectory_key in i1.payload
@@ -75,11 +77,11 @@ if __name__ == "__main__":
     detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
     crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
 
-    track_person_trajectories = TrackFromBox(
-        LRULocalVideoDecoder(INPUT_NAME), 
+    track_trajectories = TrackFromBox(
+        LRULocalVideoDecoder(INPUT_NAME, cache_size=300), 
         detect_every,
         name="track_person",
-        parallel_workers=1
+        parallel_workers=32
     )(crop_persons)
 
     def trajectory_merge_predicate(i1, i2):
@@ -94,8 +96,8 @@ if __name__ == "__main__":
         predicate=trajectory_merge_predicate,
         bounds_merge_op=Bounds3D.span,
         payload_merge_op=trajectory_payload_merge_op,
-        epsilon=1.1*detect_every
-    )(track_person_trajectories)
+        epsilon=3
+    )(track_trajectories)
 
     long_coalesced_persons = Filter(
         pred_fn=lambda intrvl: intrvl.bounds.length() >= fps * 5
@@ -120,7 +122,7 @@ if __name__ == "__main__":
         assert isinstance(intrvl, FrameGroupInterval)
         out_name = f"{OUTPUT_DIR}/{k}-{intrvl['t1']}-{intrvl['t2']}-{intrvl['x1']:.2f}-{intrvl['y1']:.2f}.mp4"
         intrvl.savevideo(out_name, fps=fps)
-        logger.debug(f"saved {out_name}")
+        logger.info(f"saved {out_name}")
 
     logger.info(
         "This example tries to find a pair of people walking together."

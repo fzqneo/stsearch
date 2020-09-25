@@ -253,7 +253,7 @@ class _LRUCache(collections.OrderedDict):
 
 class LRULocalVideoDecoder(LocalVideoDecoder):
 
-    def __init__(self, path, cache_size=32, *args, **kwargs):
+    def __init__(self, path, cache_size=300, *args, **kwargs):
 
         super().__init__(path, *args, **kwargs)
         self.lock = threading.RLock()   # overwrite lock in super
