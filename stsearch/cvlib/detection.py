@@ -9,6 +9,7 @@ from logzero import logger
 
 from rekall.bounds import Bounds3D
 from stsearch.op import Filter, Graph, Map, Op
+from stsearch.parallel import ParallelMap
 from stsearch.videolib import ImageInterval
 
 DEFAULT_DETECTION_KEY = 'CVLIB_DETECTION_KEY'
@@ -23,6 +24,7 @@ class Detection(Graph):
         server='localhost', port=5000, 
         server_list: Optional[Iterable[str]]=None,
         result_key=DEFAULT_DETECTION_KEY,
+        parallel=1,
         name=None):
 
         super().__init__()
@@ -30,9 +32,11 @@ class Detection(Graph):
         self.server_list = list(server_list or [f"{server}:{port}", ])
         self.result_key = result_key
         self.name = name
+        self.parallel = parallel
 
 
     def call(self, instream):
+        name = self.name or f"{self.__class__.__name__}:{self.result_key}"
 
         def map_fn(intrvl):
             assert isinstance(intrvl, ImageInterval)
@@ -51,7 +55,10 @@ class Detection(Graph):
             
             return intrvl
 
-        return Map(map_fn, name=f"{self.__class__.__name__}:{self.name}")(instream)
+        if self.parallel == 1:
+            return Map(map_fn, name=name)(instream)
+        else:
+            return ParallelMap(map_fn, name=name, max_workers=self.parallel)(instream)
 
     
 class DetectionVisualize(Graph):

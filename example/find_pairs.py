@@ -74,7 +74,7 @@ if __name__ == "__main__":
     
     all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
     sampled_frames = Slice(step=detect_every)(all_frames)
-    detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
+    detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000, parallel=3)(sampled_frames)
     crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
 
     track_trajectories = TrackFromBox(
