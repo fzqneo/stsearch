@@ -1,3 +1,4 @@
+import collections
 import functools
 import os
 import tempfile
@@ -156,9 +157,20 @@ class AbstractVideoDecoder(object):
 
             return cv2.resize(raw_frame, (new_W, new_H))
 
-
     def get_raw_frame(self, frame_id):
         raise NotImplementedError
+
+    def get_frame_interval(self, start_frame_id, end_frame_id, step=1):
+        """Get a list of consecutive frames
+
+        Args:
+            start_frame_id (int): start inclusive
+            end_frame_id (int): end exclusive
+
+        Returns:
+            Liast[np.ndarray]: [description]
+        """
+        return [self.get_frame(i) for i in range(start_frame_id, end_frame_id, step)]
 
 
 class LocalVideoDecoder(AbstractVideoDecoder):
@@ -168,24 +180,25 @@ class LocalVideoDecoder(AbstractVideoDecoder):
         cap = cv2.VideoCapture(path)
         self.cap = cap
         try:
-            self.frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-            self.raw_width = cap.get(cv2.CAP_PROP_FRAME_WIDTH )
-            self.raw_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+            self.frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            self.raw_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH ))
+            self.raw_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         except AttributeError: # version difference
-            self.frame_count = cap.get(cv2.CV_CAP_PROP_FRAME_COUNT)
-            self.raw_width = cap.get(cv2.CV_CAP_PROP_FRAME_WIDTH )
-            self.raw_height = cap.get(cv2.CV_CAP_PROP_FRAME_HEIGHT)
+            self.frame_count = int(cap.get(cv2.CV_CAP_PROP_FRAME_COUNT))
+            self.raw_width = int(cap.get(cv2.CV_CAP_PROP_FRAME_WIDTH ))
+            self.raw_height = int(cap.get(cv2.CV_CAP_PROP_FRAME_HEIGHT))
             
-        self.pos_frame = 0
+        self.pos_frame = 0  # frame id of the next read()
 
         self.lock = threading.Lock()
 
     def get_raw_frame(self, frame_id):
         assert frame_id < self.frame_count, f"Frame id {frame_id} out of bound {self.frame_count}" 
+        # print(f"get raw frame {frame_id} {self.__class__.__name__}")
         with self.lock:
-            if frame_id > self.pos_frame:
+            if frame_id >= self.pos_frame:
                 # future frame: do sequential decode
-                for _ in range(frame_id - self.pos_frame - 1):
+                for _ in range(frame_id - self.pos_frame):
                     self.cap.read()
             else:
                 # past frame: rewind
@@ -194,9 +207,10 @@ class LocalVideoDecoder(AbstractVideoDecoder):
                 except AttributeError:
                     self.cap.set(cv2.CV_CAP_PROP_POS_FRAMES, frame_id)
 
-            ret, frame = self.cap.read()
+            success, frame = self.cap.read()
+            assert success and frame is not None, f"frame_id={frame_id}, frame_count={self.frame_count}, CV_CAP_PROP_POS_FRAMES={self.cap.get(cv2.CAP_PROP_POS_FRAMES)}"
 
-        self.pos_frame = frame_id
+        self.pos_frame = frame_id+1
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         return frame
 
@@ -207,12 +221,65 @@ class LocalVideoDecoder(AbstractVideoDecoder):
         return f"{self.__class__.__name__}({self.path})"
 
 
+class _LRUCache(collections.OrderedDict):
+    # adapted from https://docs.python.org/3/library/collections.html#ordereddict-examples-and-recipes
+    def __init__(self, maxsize, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.maxsize = maxsize
+        self.hit = self.miss = 0
+        
+    # Not sure if we should move_to_end on GET
+    def __getitem__(self, key):
+        try:
+            value = super().__getitem__(key)
+            self.hit += 1
+            return value
+        except KeyError:
+            self.miss += 1
+            raise
+        # self.move_to_end(key)
+
+    def __setitem__(self, key, value):
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        if len(self) > self.maxsize:
+            oldest = next(iter(self))
+            del self[oldest]  
+
+    def cache_info(self):
+        return {'hit': self.hit, 'miss': self.miss}
+
+
 class LRULocalVideoDecoder(LocalVideoDecoder):
 
     def __init__(self, path, cache_size=32, *args, **kwargs):
+
         super().__init__(path, *args, **kwargs)
+        self.lock = threading.RLock()   # overwrite lock in super
+        
         self.cache_size = cache_size
-        self.get_frame = functools.lru_cache(maxsize=cache_size)(super().get_frame)
+        self.cache = _LRUCache(cache_size)
+
+    def get_frame(self, frame_id):
+        with self.lock:
+            try:
+                return self.cache[frame_id]
+            except KeyError:
+                frame = super().get_frame(frame_id)
+                self.cache[frame_id] = frame
+                return frame
+
+    def get_frame_interval(self, start_frame_id, end_frame_id, step=1):
+        with self.lock:
+            try:
+                rv = [self.cache[i] for i in range(start_frame_id, end_frame_id, step)]
+                return rv
+            except KeyError:
+                rv = super().get_frame_interval(start_frame_id, end_frame_id, step)
+                self.cache.update(dict(zip(range(start_frame_id, end_frame_id, step), rv)))
+                return rv
+
 
 class VideoToFrames(Op):
     

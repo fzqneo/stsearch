@@ -1,5 +1,6 @@
 import collections
 import functools
+import time
 import typing
 
 import cv2
@@ -24,17 +25,22 @@ def _cv2_track_from_box(decoder, window, step, trajectory_key) -> typing.Callabl
         ret_bounds = i1.bounds
         ret_payload = {trajectory_key: [VideoFrameInterval(i1.bounds, root_decoder=decoder), ]}
 
+        # buffer all frames in window at once
+        start_fid = min(i1['t1'], decoder.frame_count - 1)  # inclusive
+        end_fid = min(i1['t1'] + window, decoder.frame_count)  # exclusive
+        frames_to_track = [decoder.get_frame(fid) for fid in range(start_fid, end_fid)]
+
         # init tracker. For tracking, we must get whole frames
-        init_frame = decoder.get_frame(i1['t1'])
-        H, W = init_frame.shape[:2]
+        H, W = frames_to_track[0].shape[:2]
         # tracking box in cv2 is the form (x, y, w, h)
         init_box = np.array([i1['x1']*W, i1['y1']*H, _width(i1)*W, _height(i1)*H]).astype(np.int32)
-        tracker.init(init_frame, tuple(init_box))
+        tracker.init(frames_to_track[0], tuple(init_box))
 
-        # iterate frames and update tracker, get tracked result
-        for ts in range(int(i1['t1']+1), int(min(i1['t1']+window, decoder.frame_count)), int(step)):
+        # iterate remaining frames and update tracker, get tracked result
+        for ts, next_frame in zip(range(start_fid+1, end_fid, step), frames_to_track[1::step]):
             next_frame = decoder.get_frame(ts)
             (success, next_box) = tracker.update(next_frame)
+
             if success:
                 x, y, w, h = next_box # pixel coord
                 x1, y1, x2, y2 = x, y, x+w, y+h

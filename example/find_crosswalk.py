@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 from typing import List
@@ -19,6 +20,9 @@ from stsearch.utils import run_to_finish
 from stsearch.videolib import *
 
 from utils import VisualizeTrajectoryOnFrameGroup
+
+# cv2.setNumThreads(4)
+logger.setLevel(logging.INFO)
 
 INPUT_NAME = "example.mp4"
 OUTPUT_DIR = Path(__file__).stem + "_output"
@@ -111,17 +115,22 @@ if __name__ == "__main__":
     crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
     crop_cars = DetectionFilterFlatten(['car'], 0.5)(detections)
     
+    # parallel track 8 thread slower than 4 slower than 2 why?
     track_person_trajectories = TrackFromBox(
         LRULocalVideoDecoder(INPUT_NAME, resize=600), 
-        detect_every+1, 
+        detect_every, 
         step=1,
-        trajectory_key='traj_person')(crop_persons)
+        trajectory_key='traj_person',
+        parallel_workers=1,
+        name='track_person')(crop_persons)
 
     track_car_trajectories = TrackFromBox(
         LRULocalVideoDecoder(INPUT_NAME, resize=600), 
-        detect_every+1,
+        detect_every,
         step=1,
-        trajectory_key='traj_car')(crop_cars)
+        trajectory_key='traj_car',
+        parallel_workers=1,
+        name='track_car')(crop_cars)
 
     merged_person_trajectories = CoalesceByLast(
         predicate=traj_concatable(3, 0.5, 'traj_person'),

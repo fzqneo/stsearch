@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 
@@ -16,6 +17,8 @@ from stsearch.utils import run_to_finish
 from stsearch.videolib import *
 
 from utils import VisualizeTrajectoryOnFrameGroup
+
+logger.setLevel(logging.INFO)
 
 INPUT_NAME = "example.mp4"
 OUTPUT_DIR = Path(__file__).stem + "_output"
@@ -69,20 +72,25 @@ if __name__ == "__main__":
     
     all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
     sampled_frames = Slice(step=detect_every)(all_frames)
-    detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5002)(sampled_frames)
+    detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
     crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
 
-    track_person_trajectories = TrackFromBox(LRULocalVideoDecoder(INPUT_NAME), detect_every+1)(crop_persons)
+    track_person_trajectories = TrackFromBox(
+        LRULocalVideoDecoder(INPUT_NAME), 
+        detect_every,
+        name="track_person",
+        parallel_workers=1
+    )(crop_persons)
 
     def trajectory_merge_predicate(i1, i2):
-        return meets_before(3)(i1, i2) \
-            and iou_at_least(0.5)(i1.payload['trajectory'][-1], i2.payload['trajectory'][0])
+        return meets_before(5)(i1, i2) \
+            and iou_at_least(0.3)(i1.payload['trajectory'][-1], i2.payload['trajectory'][0])
 
     def trajectory_payload_merge_op(p1, p2):
         logger.debug(f"Merging two trajectories of lengths {len(p1['trajectory'])} and {len(p2['trajectory'])}")
         return {'trajectory': p1['trajectory'] + p2['trajectory']}
 
-    coalesced_trajectories = CoalesceByLast(
+    coalesced_trajectories = Coalesce(
         predicate=trajectory_merge_predicate,
         bounds_merge_op=Bounds3D.span,
         payload_merge_op=trajectory_payload_merge_op,
