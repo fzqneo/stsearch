@@ -37,3 +37,6 @@ class ParallelMap(Graph):
             map_fn=consume_future,
             name=f"{self.__class__.__name__}/consume/{future_key}:{self.name}"
         )(futures)
+
+
+# TODO: ParallelFilter can be implemented with Map in similar way.

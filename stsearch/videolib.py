@@ -11,6 +11,7 @@ import rekall
 
 from stsearch.interval import Interval
 from stsearch.op import *
+from stsearch.parallel import ParallelMap
 
 
 # ROOT_KEY = '_root'  # a root image/frame to generate the current one
@@ -183,10 +184,12 @@ class LocalVideoDecoder(AbstractVideoDecoder):
             self.frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             self.raw_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH ))
             self.raw_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            self.fps = cap.get(cv2.CAP_PROP_FPS)
         except AttributeError: # version difference
             self.frame_count = int(cap.get(cv2.CV_CAP_PROP_FRAME_COUNT))
             self.raw_width = int(cap.get(cv2.CV_CAP_PROP_FRAME_WIDTH ))
             self.raw_height = int(cap.get(cv2.CV_CAP_PROP_FRAME_HEIGHT))
+            self.fps = cap.get(cv2.CV_CAP_PROP_FPS)
             
         self.pos_frame = 0  # frame id of the next read()
 
@@ -271,6 +274,7 @@ class LRULocalVideoDecoder(LocalVideoDecoder):
                 return frame
 
     def get_frame_interval(self, start_frame_id, end_frame_id, step=1):
+        logger.debug(f"{self.__class__.__name__} get_frame_interval {start_frame_id} {end_frame_id} {step}")
         with self.lock:
             try:
                 rv = [self.cache[i] for i in range(start_frame_id, end_frame_id, step)]
@@ -307,10 +311,11 @@ class VideoToFrames(Op):
 
 
 class VideoCropFrameGroup(Graph):
-    def __init__(self, decoder, copy_payload=True):
+    def __init__(self, decoder, copy_payload=True, parallel=1):
         assert isinstance(decoder, AbstractVideoDecoder)
         self.decoder = decoder
         self.copy_payload = copy_payload
+        self.parallel = parallel
 
     def call(self, instream):
         def map_fn(intrvl):
@@ -319,20 +324,18 @@ class VideoCropFrameGroup(Graph):
             else:
                 fg = FrameGroupInterval(intrvl.bounds.copy())
 
-            frame_0 = self.decoder.get_frame(intrvl['t1'])
-            H, W = frame_0.shape[:2]
+            full_frames = self.decoder.get_frame_interval(intrvl['t1'], intrvl['t2'])
+            H, W = full_frames[0].shape[:2]
 
             # convert relative coordinate to absolute
             X1, X2 = int(intrvl['x1'] * W), int(intrvl['x2'] * W)
             Y1, Y2 = int(intrvl['y1'] * H), int(intrvl['y2'] * H)
             logger.debug(f"3D cropping: {intrvl['t1'], intrvl['t2'], X1, X2, Y1, Y2}")
-            fg.frames =  [
-                self.decoder.get_frame(t1)[Y1:Y2, X1:X2, :]
-                for t1 in range(intrvl['t1'], intrvl['t2'])
-            ]
+            # perform spatial crop
+            fg.frames =  [ frame[Y1:Y2, X1:X2, :] for frame in full_frames ]
             return fg
 
-        return Map(map_fn)(instream)
+        return ParallelMap(map_fn, name=self.__class__.__name__, max_workers=self.parallel)(instream)
 
 
 class Crop(Graph):

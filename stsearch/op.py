@@ -123,6 +123,7 @@ class Op(object):
 
 
 class Slice(Op):
+    # TODO can be rewritten using Filter
 
     def __init__(self, start=0, end=None, step=1, name=None):
         super().__init__(name=name)

@@ -21,7 +21,7 @@ from stsearch.videolib import *
 
 from utils import VisualizeTrajectoryOnFrameGroup
 
-# cv2.setNumThreads(4)
+cv2.setNumThreads(4)
 logger.setLevel(logging.INFO)
 
 INPUT_NAME = "example.mp4"
@@ -43,7 +43,7 @@ def separate(a1, a2, b1, b2):
     return np.dot(dap, b1-a1)*np.dot(dap, b2-a1) < 0
 
 def seg_intersect(a1, a2, b1, b2):
-    # note: this is segmenti intersect, not line intersect
+    # note: test for line segment intersect, not line intersect
     return separate(a1, a2, b1, b2) and separate(b1, b2, a1, a2)  
 
 def traj_concatable(epsilon, iou_thres, key='trajectory'):
@@ -106,41 +106,44 @@ def crosswalk_merge(key1='traj_person', key2='traj_car'):
 if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    fps = 15
+    decoder = LocalVideoDecoder(INPUT_NAME)
+    frame_count, fps = decoder.frame_count, decoder.fps
+    logger.info(f"Video info: frame_count {decoder.frame_count}, fps {decoder.fps}, raw_width {decoder.raw_width}, raw_height {decoder.raw_height}")
+    del decoder
+
     detect_every = 8
     
     all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME, resize=600))()
     sampled_frames = Slice(step=detect_every)(all_frames)
-    detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
+    detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000, parallel=2)(sampled_frames)
     crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
     crop_cars = DetectionFilterFlatten(['car'], 0.5)(detections)
     
-    # parallel track 8 thread slower than 4 slower than 2 why?
     track_person_trajectories = TrackFromBox(
-        LRULocalVideoDecoder(INPUT_NAME, resize=600), 
+        LRULocalVideoDecoder(INPUT_NAME, cache_size=450), 
         detect_every, 
         step=1,
         trajectory_key='traj_person',
-        parallel_workers=1,
+        parallel_workers=12,
         name='track_person')(crop_persons)
 
     track_car_trajectories = TrackFromBox(
-        LRULocalVideoDecoder(INPUT_NAME, resize=600), 
+        LRULocalVideoDecoder(INPUT_NAME, cache_size=450), 
         detect_every,
         step=1,
         trajectory_key='traj_car',
-        parallel_workers=1,
+        parallel_workers=8,
         name='track_car')(crop_cars)
 
     merged_person_trajectories = CoalesceByLast(
-        predicate=traj_concatable(3, 0.5, 'traj_person'),
+        predicate=traj_concatable(3, 0.3, 'traj_person'),
         bounds_merge_op=Bounds3D.span,
         payload_merge_op=traj_concat_payload('traj_person'),
         epsilon=1.1*detect_every
     )(track_person_trajectories)
 
     merged_car_trajectories = CoalesceByLast(
-        predicate=traj_concatable(3, 0.5, 'traj_car'),
+        predicate=traj_concatable(3, 0.3, 'traj_car'),
         bounds_merge_op=Bounds3D.span,
         payload_merge_op=traj_concat_payload('traj_car'),
         epsilon=1.1*detect_every
@@ -157,13 +160,22 @@ if __name__ == "__main__":
     crosswalk_patches = JoinWithTimeWindow(
         predicate=is_crosswalk(),
         merge_op=crosswalk_merge('traj_person', 'traj_car'),
-        window=int(15*60*1.5)
+        window=int(15*60),  # 1 min
+        name="join_crosswalk"
     )(long_person_trajectories, long_car_trajectories)
 
-    raw_fg = VideoCropFrameGroup(LRULocalVideoDecoder(INPUT_NAME, resize=600), copy_payload=True)(crosswalk_patches)
+    vis_decoder = LRULocalVideoDecoder(INPUT_NAME, cache_size=900, resize=600)
+    raw_fg = VideoCropFrameGroup(vis_decoder, copy_payload=True, parallel=4)(crosswalk_patches)
 
-    visualize_fg = VisualizeTrajectoryOnFrameGroup('traj_person')(raw_fg)
-    visualize_fg = VisualizeTrajectoryOnFrameGroup('traj_car')(visualize_fg)
+    # visualizing on many frames is very expensive, so we hack to shorten each fg to only 5 seconds
+    # comment this to get full visualization spanning both trajectories' times
+    def shorten(fg):
+        fg.frames = fg.frames[:int(5*fps)]
+        return fg
+    raw_fg = Map(map_fn=shorten)(raw_fg)
+
+    visualize_fg = VisualizeTrajectoryOnFrameGroup('traj_person', name="visualize-person-traj", parallel=4)(raw_fg)
+    visualize_fg = VisualizeTrajectoryOnFrameGroup('traj_car', name="visualize-car-traj", parallel=4)(visualize_fg)
 
     output = visualize_fg
     output_sub = output.subscribe()
@@ -184,6 +196,8 @@ if __name__ == "__main__":
         reference_frame = cv2.rectangle(reference_frame, (left, top), (right, bottom), (0, 255,0), 2)
 
     cv2.imwrite(f"{OUTPUT_DIR}/crosswalk.jpg", reference_frame)
+
+    logger.info(vis_decoder.cache.cache_info())
 
     logger.info(
         "This example tries to find crosswalks by finding where human trajectories intersect with car trajectories."
