@@ -15,6 +15,17 @@ python setup.py --develop
 
 See [example/README.md](example/README.md)
 
+
+## stsearch Memo
+
+1. Coordinate system: X, Y is relative between 0 -- 1. T is frame id (0-indexed). We use the same convention as OpenCV:
+```
+     x_min ------ x_max
+y_min
+  |
+y_max
+```
+
 ## ffmpeg Memo
 
 1. Segmenting the first 120 seconds of a video and downsample it to 1080p:

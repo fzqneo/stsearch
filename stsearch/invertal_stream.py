@@ -33,7 +33,7 @@ class IntervalStream(object):
 
 
 class IntervalStreamSubscriber(object):
-    def __init__(self, publisher, maxsize=100):
+    def __init__(self, publisher, maxsize=1000):
         super().__init__()
         assert isinstance(publisher, IntervalStream)
         self.q = Queue(maxsize=maxsize)

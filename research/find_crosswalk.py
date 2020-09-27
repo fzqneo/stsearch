@@ -1,4 +1,5 @@
 import logging
+import itertools
 import os
 from pathlib import Path
 from typing import List
@@ -24,7 +25,7 @@ from utils import VisualizeTrajectoryOnFrameGroup
 cv2.setNumThreads(4)
 logger.setLevel(logging.INFO)
 
-INPUT_NAME = "FifthCraig/FifthCraig1-2019-02-01-10-05-05.mp4"
+INPUT_NAME = "FifthCraig3_10m.mp4"
 OUTPUT_DIR = Path(__file__).stem + "_output"
 
 def traj_get_xy_array(L: List[Interval]) -> np.ndarray :
@@ -92,8 +93,16 @@ def is_crosswalk(key1='traj_person', key2='traj_car', degree=50):
 def crosswalk_merge(key1='traj_person', key2='traj_car'):
 
     def new_interval_merge_op(i1: Interval, i2: Interval) -> Interval:
+        # find the pairwise closest patches in the two trajectories
+        v1, v2 = min(
+            itertools.product(i1.payload[key1], i2.payload[key2]),
+            key=lambda pair: np.linalg.norm(centroid(pair[0]) - centroid(pair[1]))
+        )
+        new_bounds = v1.bounds.span(v2.bounds)
+
         # span time, intersect space
-        new_bounds = i1.bounds.combine_per_axis(i2.bounds, bounds_span, bounds_intersect, bounds_intersect)
+        # new_bounds = i1.bounds.combine_per_axis(i2.bounds, bounds_span, bounds_intersect, bounds_intersect)
+        
         new_payload = {
             key1: i1.payload[key1],
             key2: i2.payload[key2]
@@ -132,7 +141,7 @@ if __name__ == "__main__":
         detect_every,
         step=1,
         trajectory_key='traj_car',
-        parallel_workers=12,
+        parallel_workers=24,
         name='track_car')(crop_cars)
 
     merged_person_trajectories = CoalesceByLast(
@@ -165,19 +174,20 @@ if __name__ == "__main__":
     )(long_person_trajectories, long_car_trajectories)
 
     vis_decoder = LRULocalVideoDecoder(INPUT_NAME, cache_size=900, resize=600)
-    raw_fg = VideoCropFrameGroup(vis_decoder, copy_payload=True, parallel=4)(crosswalk_patches)
+    # raw_fg = VideoCropFrameGroup(vis_decoder, copy_payload=True, parallel=4)(crosswalk_patches)
 
-    # visualizing on many frames is very expensive, so we hack to shorten each fg to only 2 seconds
-    # comment this to get full visualization spanning both trajectories' times
-    def shorten(fg):
-        fg.frames = fg.frames[:int(2*fps)]
-        return fg
-    raw_fg = Map(map_fn=shorten)(raw_fg)
+    # # visualizing on many frames is very expensive, so we hack to shorten each fg to only 2 seconds
+    # # comment this to get full visualization spanning both trajectories' times
+    # def shorten(fg):
+    #     fg.frames = fg.frames[:int(2*fps)]
+    #     return fg
+    # raw_fg = Map(map_fn=shorten)(raw_fg)
 
-    visualize_fg = VisualizeTrajectoryOnFrameGroup('traj_person', name="visualize-person-traj", parallel=4)(raw_fg)
-    visualize_fg = VisualizeTrajectoryOnFrameGroup('traj_car', name="visualize-car-traj", parallel=4)(visualize_fg)
+    # visualize_fg = VisualizeTrajectoryOnFrameGroup('traj_person', name="visualize-person-traj", parallel=4)(raw_fg)
+    # visualize_fg = VisualizeTrajectoryOnFrameGroup('traj_car', name="visualize-car-traj", parallel=4)(visualize_fg)
 
-    output = visualize_fg
+    output = crosswalk_patches  # skip visualizing video for speed.
+    # output = visualize_fg
     output_sub = output.subscribe()
     output.start_thread_recursive()
 
@@ -188,10 +198,11 @@ if __name__ == "__main__":
     votes = np.zeros(reference_frame.shape[:2], dtype=np.int32)
 
     for k, intrvl in enumerate(output_sub):
-        assert isinstance(intrvl, FrameGroupInterval)
-        out_name = f"{OUTPUT_DIR}/{k}-{intrvl['t1']}-{intrvl['t2']}-{intrvl['x1']:.2f}-{intrvl['y1']:.2f}.mp4"
-        intrvl.savevideo(out_name, fps=fps)
-        logger.debug(f"saved {out_name}")
+
+        # assert isinstance(intrvl, FrameGroupInterval)
+        # out_name = f"{OUTPUT_DIR}/{k}-{intrvl['t1']}-{intrvl['t2']}-{intrvl['x1']:.2f}-{intrvl['y1']:.2f}.mp4"
+        # intrvl.savevideo(out_name, fps=fps)
+        # logger.debug(f"saved {out_name}")
 
         # visualize box on vis_rect
         H, W = reference_frame.shape[:2]
