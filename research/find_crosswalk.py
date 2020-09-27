@@ -24,7 +24,7 @@ from utils import VisualizeTrajectoryOnFrameGroup
 cv2.setNumThreads(4)
 logger.setLevel(logging.INFO)
 
-INPUT_NAME = "example.mp4"
+INPUT_NAME = "FifthCraig/FifthCraig1-2019-02-01-10-05-05.mp4"
 OUTPUT_DIR = Path(__file__).stem + "_output"
 
 def traj_get_xy_array(L: List[Interval]) -> np.ndarray :
@@ -132,7 +132,7 @@ if __name__ == "__main__":
         detect_every,
         step=1,
         trajectory_key='traj_car',
-        parallel_workers=8,
+        parallel_workers=12,
         name='track_car')(crop_cars)
 
     merged_person_trajectories = CoalesceByLast(
@@ -160,17 +160,17 @@ if __name__ == "__main__":
     crosswalk_patches = JoinWithTimeWindow(
         predicate=is_crosswalk(),
         merge_op=crosswalk_merge('traj_person', 'traj_car'),
-        window=int(15*60),  # 1 min
+        window=int(15*60*2),  # 2 min
         name="join_crosswalk"
     )(long_person_trajectories, long_car_trajectories)
 
     vis_decoder = LRULocalVideoDecoder(INPUT_NAME, cache_size=900, resize=600)
     raw_fg = VideoCropFrameGroup(vis_decoder, copy_payload=True, parallel=4)(crosswalk_patches)
 
-    # visualizing on many frames is very expensive, so we hack to shorten each fg to only 5 seconds
+    # visualizing on many frames is very expensive, so we hack to shorten each fg to only 2 seconds
     # comment this to get full visualization spanning both trajectories' times
     def shorten(fg):
-        fg.frames = fg.frames[:int(5*fps)]
+        fg.frames = fg.frames[:int(2*fps)]
         return fg
     raw_fg = Map(map_fn=shorten)(raw_fg)
 
@@ -182,6 +182,10 @@ if __name__ == "__main__":
     output.start_thread_recursive()
 
     reference_frame = cv2.cvtColor(LocalVideoDecoder(INPUT_NAME, resize=600).get_frame(10), cv2.COLOR_RGB2BGR)
+    # for visualizing rect
+    vis_rect = reference_frame.copy()
+    # for visualizing voting/heatmap
+    votes = np.zeros(reference_frame.shape[:2], dtype=np.int32)
 
     for k, intrvl in enumerate(output_sub):
         assert isinstance(intrvl, FrameGroupInterval)
@@ -189,13 +193,24 @@ if __name__ == "__main__":
         intrvl.savevideo(out_name, fps=fps)
         logger.debug(f"saved {out_name}")
 
-        # visualize x,y on reference frame
+        # visualize box on vis_rect
         H, W = reference_frame.shape[:2]
         left, top = int(intrvl['x1'] * W), int(intrvl['y1'] * H)
         right, bottom = int(intrvl['x2'] * W), int(intrvl['y2'] * H)
-        reference_frame = cv2.rectangle(reference_frame, (left, top), (right, bottom), (0, 255,0), 2)
+        vis_rect = cv2.rectangle(vis_rect, (left, top), (right, bottom), (0, 255,0), 2)
 
-    cv2.imwrite(f"{OUTPUT_DIR}/crosswalk.jpg", reference_frame)
+        # add votes
+        votes[top:bottom, left:right] += 1
+
+    cv2.imwrite(f"{OUTPUT_DIR}/crosswalk.jpg", vis_rect)
+
+    # visualize votes on heatmap
+    hm = 155 * votes / np.max(votes)
+    hm[np.nonzero(hm)] += 100   # clearly separate zero-vote
+    hm = hm.astype(np.uint8)
+    hm = cv2.applyColorMap(hm, cv2.COLORMAP_JET)
+    vis_hm = cv2.addWeighted(hm, 0.5, reference_frame, 0.5, 0)
+    cv2.imwrite(f"{OUTPUT_DIR}/crosswalk_hm.jpg", vis_hm)
 
     logger.info(vis_decoder.cache.cache_info())
 
