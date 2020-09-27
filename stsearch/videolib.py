@@ -2,12 +2,15 @@ import collections
 import functools
 import os
 import tempfile
+import typing
 import threading
 
 import cv2
 from logzero import logger
 import numpy as np
+
 import rekall
+import rekall.bounds
 
 from stsearch.interval import Interval
 from stsearch.op import *
@@ -16,12 +19,18 @@ from stsearch.parallel import ParallelMap
 
 # ROOT_KEY = '_root'  # a root image/frame to generate the current one
 RGB_KEY = '_rgb'    # numpy array (H, W, 3)
+GRAY_KEY = '_gray'
 JPEG_KEY = '_jpeg'
 FRAMEGROUP_KEY = '_frames'  # a list of numpy array
 
 class ImageInterval(Interval):
 
-    def __init__(self, bounds, payload=None, root=None):
+    def __init__(
+        self, 
+        bounds: rekall.bounds.Bounds, 
+        payload: typing.Optional[dict] = None, 
+        root: typing.Optional[Interval] = None):
+
         super().__init__(bounds, payload=payload)
         self.root = root or self
 
@@ -41,6 +50,18 @@ class ImageInterval(Interval):
     @rgb.setter
     def rgb(self, val):
         self.payload[RGB_KEY] = np.array(val)
+
+    @rgb.deleter
+    def rgb(self):
+        if RGB_KEY in self.payload:
+            self.payload.pop(RGB_KEY, None)
+
+    @property
+    def gray(self):
+        # Can upgrade to functools.cached_property with Python>=3.8
+        if GRAY_KEY not in self.payload:
+            self.payload[GRAY_KEY] = cv2.cvtColor(self.rgb, cv2.COLOR_RGB2GRAY)
+        return self.payload[GRAY_KEY]
 
     @property
     def rgb_height(self):

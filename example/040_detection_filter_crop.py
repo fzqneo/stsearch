@@ -3,7 +3,7 @@ from pathlib import Path
 
 from logzero import logger
 
-from stsearch.cvlib import Detection, DetectionFilter, DetectionFilterFlatten
+from stsearch.cvlib import Detection, DetectionFilterFlatten
 from stsearch.interval import *
 from stsearch.op import *
 from stsearch.utils import run_to_finish

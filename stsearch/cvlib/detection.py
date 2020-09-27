@@ -8,7 +8,7 @@ import numpy as np
 from logzero import logger
 
 from rekall.bounds import Bounds3D
-from stsearch.op import Filter, Graph, Map, Op
+from stsearch.op import Filter, Flatten, Graph, Map, Op
 from stsearch.parallel import ParallelMap
 from stsearch.videolib import ImageInterval
 
@@ -126,7 +126,7 @@ class DetectionFilter(Graph):
         return Filter(pred_fn)(instream)
 
 
-class DetectionFilterFlatten(Op):
+class DetectionFilterFlatten(Graph):
 
     def __init__(self, targets, confidence=0.9, result_key=DEFAULT_DETECTION_KEY, name=None):
         super().__init__()
@@ -134,16 +134,12 @@ class DetectionFilterFlatten(Op):
         self.targets = targets
         self.confidence = confidence
         self.result_key = result_key
+        self.name = name or self.__class__.__name__
 
     def call(self, instream):
-        self.instream = instream
 
-    def execute(self):
-        while True:
-            intrvl = self.instream.get()
-            if intrvl is None:
-                return False
-
+        def flatten_fn(intrvl):
+            rv = []
             try:
                 detections = intrvl.payload[self.result_key]
             except KeyError:
@@ -166,8 +162,8 @@ class DetectionFilterFlatten(Op):
                             intrvl['y1'] + intrvl.bounds.height() * bottom
                         )
                         new_patch = ImageInterval(new_bounds, root=intrvl.root)
-                        self.publish(new_patch)
-            if has_result:
-                return True
-            else:
-                continue
+                        rv.append(new_patch)
+            rv.sort(key=lambda i: i.bounds)
+            return rv
+
+        return Flatten(flatten_fn, name=self.name)(instream)

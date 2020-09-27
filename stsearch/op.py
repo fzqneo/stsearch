@@ -189,6 +189,31 @@ class Filter(Op):
             else:
                 continue
 
+class Flatten(Op):
+    def __init__(self, flatten_fn: typing.Callable[[Interval], typing.List[Interval]], name=None):
+        super().__init__(name)
+        self.flatten_fn = flatten_fn
+        self.done = False
+        self.result_buffer = []
+
+    def call(self, instream):
+        self.instream = instream
+
+    def execute(self):
+        while not self.done and len(self.result_buffer) == 0:
+            i1 = self.instream.get()
+            if i1 is None:
+                self.done = True
+                break
+            else:
+                self.result_buffer.extend(self.flatten_fn(i1))
+        
+        if len(self.result_buffer) > 0:
+            self.publish(self.result_buffer.pop(0))
+            return True
+        else:
+            return False
+
 
 class FromIterable(Op):
     def __init__(self, iterable_of_intervals: typing.Iterable[Interval], name=None):
