@@ -4,6 +4,7 @@ import time
 import typing
 
 import cv2
+from logzero import logger
 import numpy as np
 
 from rekall.bounds import Bounds3D
@@ -184,15 +185,13 @@ class SORTTrackByDetection(Op):
         else:
             return False
 
-
-from stsearch.third_party.opticalflow_mot.optical_flow.getFeatures import getFeatures
-from stsearch.third_party.opticalflow_mot.optical_flow.estimateAllTranslation import estimateAllTranslation
-from stsearch.third_party.opticalflow_mot.optical_flow.applyGeometricTransformation import applyGeometricTransformation
+from .optical_flow import get_good_features_to_track, estimate_feature_translation, estimate_box_translation
 
 class TrackOpticalFlowFromBoxes(Graph):
 
     # https://github.com/jguoaj/multi-object-tracking
-    
+    # https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_video/py_lucas_kanade/py_lucas_kanade.html
+
     def __init__(
         self, 
         get_boxes_fn: typing.Callable[[Interval], np.ndarray], 
@@ -222,58 +221,81 @@ class TrackOpticalFlowFromBoxes(Graph):
             # buffer all frames in window at once
             start_fid = min(i1['t1'], decoder.frame_count - 1)  # inclusive
             end_fid = min(i1['t1'] + window, decoder.frame_count)  # exclusive
-            frames_to_track = decoder.get_frame_interval(start_fid, end_fid, step)
-            H, W = frames_to_track[0].shape[:2]
+            origin_frames_to_track = decoder.get_frame_interval(start_fid, end_fid, step)
+            frames_to_track = [ cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY) for frame in origin_frames_to_track ]  # optical flow only needs gray images
+
+            old_frame = frames_to_track[0]
+            H, W = old_frame.shape[:2]
 
             initial_boxes_and_score = self.get_boxes_fn(i1)
-            keep_track = tuple([ [ (i1['t1'], xmin, xmax, ymin, ymax),] for xmin, ymin, xmax, ymax, _ in initial_boxes_and_score ])
+            if initial_boxes_and_score.shape[0] == 0:
+                print("No box to start.")
+                return []
 
-            # following code addapted from https://github.com/jguoaj/multi-object-tracking/blob/master/tracking.py
-            # seems this code doesn't report lost track
-            n_object = initial_boxes_and_score.shape[0]
-            bboxs = np.empty((n_object,4,2), dtype=np.float)
-            i = 0
-            for row in initial_boxes_and_score:
-                xmin, ymin, xmax, ymax, _ = row
-                xmin, ymin, xmax, ymax = xmin*W, ymin*H, xmax*W, ymax*H
-                xmin, ymin, boxw, boxh = int(xmin), int(ymin), int(xmax-xmin), int(ymax-ymin)
-                bboxs[i,:,:] = np.array([[xmin,ymin],[xmin+boxw,ymin],[xmin,ymin+boxh],[xmin+boxw,ymin+boxh]]).astype(float)
-                i = i+1
+            keep_track = [ [ (i1['t1'], xmin, xmax, ymin, ymax),] for xmin, ymin, xmax, ymax, _ in initial_boxes_and_score ]
+            done_track = []
 
-            startXs,startYs = getFeatures(cv2.cvtColor(frames_to_track[0],cv2.COLOR_RGB2GRAY),bboxs,use_shi=False)
-            oldframe = frames_to_track[0]
-            oldbboxs = bboxs
+            # box format: (xmin, ymin, xmax, ymax)
+            old_bboxs = np.multiply(initial_boxes_and_score[:, :4], [W, H, W, H]).astype(int)    # convert relative to pixel coord
+            assert old_bboxs.shape[1] == 4
 
-            for ts, frame in zip(range(start_fid + step, end_fid, step), frames_to_track[1:]):
-                newXs, newYs = estimateAllTranslation(startXs, startYs, oldframe, frame)
-                Xs, Ys, newbboxs = applyGeometricTransformation(startXs, startYs, newXs, newYs, oldbboxs)
-                # update coordinates
-                (startXs, startYs) = (Xs, Ys)
+            old_features = get_good_features_to_track(old_frame, old_bboxs)
 
-                oldframe = frame
-                oldbboxs = newbboxs
+            vis_img = cv2.cvtColor(old_frame.copy(), cv2.COLOR_RGB2BGR)
 
-                # update feature points as required
-                n_features_left = np.sum(Xs!=-1)
-                print('# of Features: %d'%n_features_left)
-                if n_features_left < 15:
-                    print('Generate New Features')
-                    try:
-                        startXs,startYs = getFeatures(cv2.cvtColor(frame,cv2.COLOR_RGB2GRAY),newbboxs)
-                    except:
-                        print("frame:", frame.shape, frame)
-                        print("newbboxs", newbboxs) # newbboxs can have NAN
-                        raise
+            for x,y in np.vstack(old_features):
+                x, y = int(x), int(y)
+                vis_img = cv2.circle(vis_img,(x,y),3, (255,0,0),-1)
+            for xmin, ymin, xmax, ymax in old_bboxs:
+                vis_img = cv2.rectangle(vis_img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 1)
+            cv2.imwrite(f"vis/{start_fid}-init.jpg", vis_img)
 
-                # draw bounding box and visualize feature point for each object
-                for j in range(n_object):
-                    (xmin, ymin, boxw, boxh) = cv2.boundingRect(newbboxs[j,:,:].astype(int))
-                    xmin, ymin, xmax, ymax = xmin, ymin, xmin+boxw, ymin+boxh
-                    keep_track[j].append( (ts, xmin/W, xmax/W, ymin/H, ymax/H) )
+            for ts, frame, color_frame in \
+                zip(range(start_fid + step, end_fid, step), frames_to_track[1:], origin_frames_to_track[1:] ):
+        
+                if len(keep_track) == 0:
+                    break
 
-            # Done. Conver keep_track into output
+                good_old_features, good_new_features = estimate_feature_translation(old_frame, frame, old_features)
+                new_bboxs, status = estimate_box_translation(good_old_features, good_new_features, old_bboxs)
+
+                temp_keep_track = []
+
+                for track_id, (cur_track, box, s) in enumerate(zip(keep_track, new_bboxs, status)):
+                    if s:
+                        xmin, ymin, xmax, ymax = box
+                        temp_keep_track.append(cur_track)
+                        cur_track.append( (ts, xmin/W, xmax/W, ymin/H, ymax/H ))
+                    else:
+                        logger.info(f"Track {track_id} terminates at frame {ts}")
+                        done_track.append(cur_track)
+
+                new_bboxs = np.vstack(new_bboxs[status==1]).round().astype(int)
+                new_bboxs[:, [0,2]] = np.clip(new_bboxs[:, [0,2]], 0, W)
+                new_bboxs[:, [1,3]] = np.clip(new_bboxs[:, [1,3]], 0, H)
+                new_features = [ good_new_features[i] for i in np.nonzero(status)[0] ]
+                assert len(new_features) == new_bboxs.shape[0] == len(temp_keep_track), f"{len(new_features)}, {new_bboxs.shape}, {len(temp_keep_track)}"
+           
+                vis_img = cv2.cvtColor(color_frame.copy(), cv2.COLOR_RGB2BGR)
+                for (a,b), (c,d) in zip(np.vstack(good_old_features), np.vstack(good_new_features)):
+                    a, b, c, d = int(a), int(b), int(c), int(d)
+                    vis_img = cv2.circle(vis_img,(a,b),3, (255,0,0),-1)
+                    vis_img = cv2.circle(vis_img,(c,d),3, (0,255,0),-1)
+                    vis_img = cv2.line(vis_img, (a,b), (c,d), (0,0,255), 2)
+                for xmin, ymin, xmax, ymax in old_bboxs:
+                    vis_img = cv2.rectangle(vis_img, (xmin, ymin), (xmax, ymax), (255, 0, 0), 1)
+                for xmin, ymin, xmax, ymax in new_bboxs:
+                    vis_img = cv2.rectangle(vis_img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 1)
+                cv2.imwrite(f"vis/{ts}.jpg", vis_img)
+
+                # update old stuff
+                keep_track = temp_keep_track
+                old_bboxs = new_bboxs
+                old_features = new_features
+
+            # Done. Convert keep_track into output
             rv = []
-            for track in keep_track:
+            for track in (done_track + keep_track):
                 new_trajectory = [
                     Interval(
                         Bounds3D(ts, ts+1, xmin, xmax, ymin, ymax)
