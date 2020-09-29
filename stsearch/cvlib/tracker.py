@@ -187,6 +187,7 @@ class SORTTrackByDetection(Op):
 
 from .optical_flow import get_good_features_to_track, estimate_feature_translation, estimate_box_translation
 
+_DEBUG_VIS_OPTICAL = True  # requires a vis/ folder in working directory
 class TrackOpticalFlowFromBoxes(Graph):
 
     # https://github.com/jguoaj/multi-object-tracking
@@ -242,14 +243,15 @@ class TrackOpticalFlowFromBoxes(Graph):
             old_features = get_good_features_to_track(old_frame, old_bboxs)
             assert len(old_features) == old_bboxs.shape[0]
 
-            vis_img = cv2.cvtColor(old_frame.copy(), cv2.COLOR_RGB2BGR)
+            vis_img = cv2.cvtColor(origin_frames_to_track[0].copy(), cv2.COLOR_RGB2BGR)
 
-            for x,y in np.vstack(old_features):
-                x, y = int(x), int(y)
-                vis_img = cv2.circle(vis_img,(x,y),3, (255,0,0),-1)
-            for xmin, ymin, xmax, ymax in old_bboxs:
-                vis_img = cv2.rectangle(vis_img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 1)
-            cv2.imwrite(f"vis/{start_fid}-init.jpg", vis_img)
+            if _DEBUG_VIS_OPTICAL:
+                for x,y in np.vstack(old_features):
+                    x, y = int(x), int(y)
+                    vis_img = cv2.circle(vis_img,(x,y),3, (255,0,0),-1)
+                for xmin, ymin, xmax, ymax in old_bboxs:
+                    vis_img = cv2.rectangle(vis_img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 1)
+                cv2.imwrite(f"vis/{start_fid}-init.jpg", vis_img)
 
             for ts, frame, color_frame in \
                 zip(range(start_fid + step, end_fid, step), frames_to_track[1:], origin_frames_to_track[1:] ):
@@ -264,6 +266,9 @@ class TrackOpticalFlowFromBoxes(Graph):
                     raise
 
                 new_bboxs, status = estimate_box_translation(good_old_features, good_new_features, old_bboxs)
+                
+                if np.count_nonzero(status) == 0:
+                    break
 
                 temp_keep_track = []
 
@@ -282,17 +287,18 @@ class TrackOpticalFlowFromBoxes(Graph):
                 new_features = [ good_new_features[i] for i in np.nonzero(status)[0] ]
                 assert len(new_features) == new_bboxs.shape[0] == len(temp_keep_track), f"{len(new_features)}, {new_bboxs.shape}, {len(temp_keep_track)}"
            
-                vis_img = cv2.cvtColor(color_frame.copy(), cv2.COLOR_RGB2BGR)
-                for (a,b), (c,d) in zip(np.vstack(good_old_features), np.vstack(good_new_features)):
-                    a, b, c, d = int(a), int(b), int(c), int(d)
-                    vis_img = cv2.circle(vis_img,(a,b),3, (255,0,0),-1)
-                    vis_img = cv2.circle(vis_img,(c,d),3, (0,255,0),-1)
-                    vis_img = cv2.line(vis_img, (a,b), (c,d), (0,0,255), 2)
-                for xmin, ymin, xmax, ymax in old_bboxs:
-                    vis_img = cv2.rectangle(vis_img, (xmin, ymin), (xmax, ymax), (255, 0, 0), 1)
-                for xmin, ymin, xmax, ymax in new_bboxs:
-                    vis_img = cv2.rectangle(vis_img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 1)
-                cv2.imwrite(f"vis/{ts}.jpg", vis_img)
+                if _DEBUG_VIS_OPTICAL:
+                    vis_img = cv2.cvtColor(color_frame.copy(), cv2.COLOR_RGB2BGR)
+                    for (a,b), (c,d) in zip(np.vstack(good_old_features), np.vstack(good_new_features)):
+                        a, b, c, d = int(a), int(b), int(c), int(d)
+                        vis_img = cv2.circle(vis_img,(a,b),3, (255,0,0),-1)
+                        vis_img = cv2.circle(vis_img,(c,d),3, (0,255,0),-1)
+                        vis_img = cv2.line(vis_img, (a,b), (c,d), (0,0,255), 2)
+                    for xmin, ymin, xmax, ymax in old_bboxs:
+                        vis_img = cv2.rectangle(vis_img, (xmin, ymin), (xmax, ymax), (255, 0, 0), 1)
+                    for xmin, ymin, xmax, ymax in new_bboxs:
+                        vis_img = cv2.rectangle(vis_img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 1)
+                    cv2.imwrite(f"vis/{ts}.jpg", vis_img)
 
                 # update old stuff
                 keep_track = temp_keep_track

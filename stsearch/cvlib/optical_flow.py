@@ -8,7 +8,7 @@ from sklearn.cluster import KMeans
 # params for ShiTomasi corner detection
 FEATURE_PARAMS = dict(
     maxCorners=50,
-    qualityLevel=0.3,
+    qualityLevel=0.2,
     minDistance=3,
     blockSize=7)
 
@@ -105,23 +105,42 @@ def estimate_box_translation(
     for old_pts, new_pts, (xmin, ymin, xmax, ymax) in zip(old_features, new_features, old_bboxs):
         assert old_pts.shape == new_pts.shape
 
-        if old_pts.shape[0] < 4:
-            logger.warn("Too few points for K-means")
+        # filter pts that are in the box
+        in_box_inds = (old_pts[:,0]>=xmin) & (old_pts[:,1]>=ymin) & (old_pts[:,0]<=xmax) & (old_pts[:,1]<=ymax)
+        old_pts = old_pts[in_box_inds]
+        new_pts = new_pts[in_box_inds]
+
+        if old_pts.shape[0] <= 1:
+            logger.warn("Too few points for estimating box")
             new_bboxs.append([-1,-1,-1,-1])
             status.append(0)
             continue
 
         pts_shift = new_pts - old_pts
-        kmeans = KMeans(n_clusters=2, random_state=0).fit(pts_shift)
-        if np.count_nonzero(kmeans.labels_==0) >= np.count_nonzero(kmeans.labels_==1):
-            majority = 0
+        median_shift = np.median(pts_shift, axis=0)
+        majority_inds = (pts_shift @ median_shift) >= 0
+        if np.count_nonzero(majority_inds) > 2:
+            majority_old_pts = old_pts[majority_inds]
+            majority_new_pts = new_pts[majority_inds]
         else:
-            majority = 1
-        
-        majority_old_pts = old_pts[kmeans.labels_ == majority]
-        majority_new_pts = new_pts[kmeans.labels_ == majority]
+            majority_old_pts = old_pts
+            majority_new_pts = new_pts
 
-        M, mask = cv2.estimateAffinePartial2D(
+        # # if all points shift in the same x/y directions, we don't do kmeans
+        # if (np.multiply(pts_shift.min(axis=0), pts_shift.max(axis=0)) >= 0).all():
+        #     majority_old_pts = old_pts
+        #     majority_new_pts = new_pts
+        # else:
+        #     kmeans = KMeans(n_clusters=2, random_state=0).fit(pts_shift)
+        #     if np.count_nonzero(kmeans.labels_==0) >= np.count_nonzero(kmeans.labels_==1):
+        #         majority = 0
+        #     else:
+        #         majority = 1        
+        #     majority_old_pts = old_pts[kmeans.labels_ == majority]
+        #     majority_new_pts = new_pts[kmeans.labels_ == majority]
+
+        # M, mask = cv2.estimateAffinePartial2D(
+        M, mask = cv2.estimateAffine2D(
             majority_old_pts.reshape((-1,1,2)),
             majority_new_pts.reshape((-1,1,2)), 
             method=cv2.RANSAC)

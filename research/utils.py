@@ -32,7 +32,7 @@ class VisualizeTrajectoryOnFrameGroup(Graph):
             assert tkey in fg.payload, f"{tkey} not found in {str(fg)}"
 
             # 1. Draw all visualization on a frame with black background
-            vis_frame = np.zeros_like(fg.frames[0])
+            global_vis_frame = np.zeros_like(fg.frames[0])
 
             trajectory = fg.payload[tkey]
             Xmins = list(map(itemgetter('x1'), trajectory))
@@ -65,21 +65,33 @@ class VisualizeTrajectoryOnFrameGroup(Graph):
 
             for j, (p1, p2) in enumerate(zip(centroids[:-1], centroids[1:])):
                 if self.draw_line:
-                    vis_frame = cv2.line(vis_frame, tuple(p1), tuple(p2), color, thickness)
+                    global_vis_frame = cv2.line(global_vis_frame, tuple(p1), tuple(p2), color, thickness)
                 if self.draw_label:
-                    vis_frame = cv2.putText(vis_frame, str(j), tuple(p1), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 1, cv2.LINE_AA)
+                    global_vis_frame = cv2.putText(global_vis_frame, str(j), tuple(p1), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1, cv2.LINE_AA)
 
             if self.draw_box:
-                for left, top, right, bottom in zip(Xmins, Ymins, Xmaxs, Ymaxs):
-                    vis_frame = cv2.rectangle(vis_frame, (left, top), (right, bottom), (0, 0, 255), 3)
+                boxs_to_draw = list(zip([i['t1'] for i in trajectory], Xmins, Ymins, Xmaxs, Ymaxs))
 
             # 2. Overlay it on all frames
             new_frames = []
-            for fid, frame in enumerate(fg.frames):
+            vis_ts_box = None
+            for j, frame in enumerate(fg.frames):
                 frame = frame.copy()
-                assert vis_frame.shape == frame.shape, f"{fid} {vis_frame.shape} {frame.shape}"
-                frame[vis_frame > 0] = vis_frame[vis_frame > 0] 
+                assert global_vis_frame.shape == frame.shape, f"{j} {global_vis_frame.shape} {frame.shape}"
+                frame[global_vis_frame > 0] = global_vis_frame[global_vis_frame > 0] 
+
+                if self.draw_box:
+                    ts = fg['t1'] + j
+                    for b in boxs_to_draw:
+                        if ts == b[0]:
+                            vis_ts_box = b
+
+                    if vis_ts_box:
+                        _, left, top, right, bottom = vis_ts_box
+                        frame = cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 3)
+
                 new_frames.append(frame)
+
 
             fg.frames = new_frames
             return fg
