@@ -7,13 +7,13 @@ from sklearn.cluster import KMeans
 
 # params for ShiTomasi corner detection
 FEATURE_PARAMS = dict(
-    maxCorners=100,
+    maxCorners=50,
     qualityLevel=0.3,
     minDistance=3,
     blockSize=7)
 
 LK_PARAMS = dict(
-    winSize  = (21, 21),
+    winSize  = (15, 15),
     maxLevel = 3,
     criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
 
@@ -63,7 +63,7 @@ def estimate_feature_translation(
         be removed.
     """
     n_old_features = [f.shape[0] for f in box_features]
-    p0 = np.vstack(box_features)
+    p0 = np.vstack(box_features).astype(np.float32)
     
     p1, st, err = cv2.calcOpticalFlowPyrLK(
         img_old, img_new, p0.reshape((-1, 1, 2)), None, **LK_PARAMS)
@@ -104,6 +104,13 @@ def estimate_box_translation(
     new_bboxs = []
     for old_pts, new_pts, (xmin, ymin, xmax, ymax) in zip(old_features, new_features, old_bboxs):
         assert old_pts.shape == new_pts.shape
+
+        if old_pts.shape[0] < 4:
+            logger.warn("Too few points for K-means")
+            new_bboxs.append([-1,-1,-1,-1])
+            status.append(0)
+            continue
+
         pts_shift = new_pts - old_pts
         kmeans = KMeans(n_clusters=2, random_state=0).fit(pts_shift)
         if np.count_nonzero(kmeans.labels_==0) >= np.count_nonzero(kmeans.labels_==1):

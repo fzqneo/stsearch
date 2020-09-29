@@ -25,7 +25,7 @@ from utils import VisualizeTrajectoryOnFrameGroup
 cv2.setNumThreads(4)
 logger.setLevel(logging.INFO)
 
-INPUT_NAME = "FifthCraig3_10m.mp4"
+INPUT_NAME = "FifthCraig5_10m.mp4"
 OUTPUT_DIR = Path(__file__).stem + "_output"
 
 def traj_get_xy_array(L: List[Interval]) -> np.ndarray :

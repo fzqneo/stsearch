@@ -8,7 +8,7 @@ import numpy as np
 from rekall.bounds import Bounds3D
 from rekall.predicates import _area, _height, _width, meets_before, iou_at_least, overlaps_before
 
-from stsearch.cvlib import Detection, SORTTrackFromDetection, get_SORT_input_from_detection
+from stsearch.cvlib import Detection, SORTTrackByDetection, get_boxes_from_detection
 from stsearch.interval import *
 from stsearch.op import *
 from stsearch.utils import run_to_finish
@@ -30,8 +30,8 @@ if __name__ == "__main__":
     sampled_frames = Slice(step=detect_every)(all_frames)
     detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5002)(sampled_frames)
 
-    short_trajectories = SORTTrackFromDetection(
-        get_input_fn=get_SORT_input_from_detection(['person'], 0.3),
+    short_trajectories = SORTTrackByDetection(
+        get_boxes_fn=get_boxes_from_detection(['person'], 0.3),
         window=fps*30,
         trajectory_key='trajectory',
         max_age=7,

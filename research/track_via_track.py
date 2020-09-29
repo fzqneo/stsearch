@@ -16,9 +16,10 @@ from stsearch.videolib import *
 
 from utils import VisualizeTrajectoryOnFrameGroup
 
+cv2.setNumThreads(4)
+
 INPUT_NAME = "example.mp4"
 OUTPUT_DIR = Path(__file__).stem + "_output"
-
 
 if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -31,7 +32,7 @@ if __name__ == "__main__":
     detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
     crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
 
-    short_trajectories = TrackFromBox(LRULocalVideoDecoder(INPUT_NAME), detect_every+1)(crop_persons)
+    short_trajectories = TrackFromBox(LRULocalVideoDecoder(INPUT_NAME), detect_every, parallel_workers=24)(crop_persons)
 
     def trajectory_merge_predicate(i1, i2):
         return meets_before(3)(i1, i2) \

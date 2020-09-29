@@ -240,6 +240,7 @@ class TrackOpticalFlowFromBoxes(Graph):
             assert old_bboxs.shape[1] == 4
 
             old_features = get_good_features_to_track(old_frame, old_bboxs)
+            assert len(old_features) == old_bboxs.shape[0]
 
             vis_img = cv2.cvtColor(old_frame.copy(), cv2.COLOR_RGB2BGR)
 
@@ -256,7 +257,12 @@ class TrackOpticalFlowFromBoxes(Graph):
                 if len(keep_track) == 0:
                     break
 
-                good_old_features, good_new_features = estimate_feature_translation(old_frame, frame, old_features)
+                try:
+                    good_old_features, good_new_features = estimate_feature_translation(old_frame, frame, old_features)
+                except:
+                    logger.error(old_features)
+                    raise
+
                 new_bboxs, status = estimate_box_translation(good_old_features, good_new_features, old_bboxs)
 
                 temp_keep_track = []
@@ -292,6 +298,7 @@ class TrackOpticalFlowFromBoxes(Graph):
                 keep_track = temp_keep_track
                 old_bboxs = new_bboxs
                 old_features = new_features
+                old_frame = frame
 
             # Done. Convert keep_track into output
             rv = []

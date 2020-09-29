@@ -16,6 +16,9 @@ from stsearch.videolib import *
 
 from utils import VisualizeTrajectoryOnFrameGroup
 
+# cv2.setNumThreads(4)
+
+# INPUT_NAME = "multi-object-tracking-2.mp4"
 INPUT_NAME = "example.mp4"
 OUTPUT_DIR = Path(__file__).stem + "_output"
 
@@ -24,14 +27,14 @@ if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     fps = 15
-    detect_every = 15
+    detect_every = 150
     
     all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
     sampled_frames = Slice(step=detect_every)(all_frames)
     detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000, parallel=2)(sampled_frames)
 
     short_trajectories = TrackOpticalFlowFromBoxes(
-        get_boxes_fn=get_boxes_from_detection(['person'], 0.5),
+        get_boxes_fn=get_boxes_from_detection(['car', 'person'], 0.5),
         decoder=LRULocalVideoDecoder(INPUT_NAME),
         window=detect_every,
         trajectory_key='trajectory',
@@ -58,7 +61,7 @@ if __name__ == "__main__":
 
     raw_fg = VideoCropFrameGroup(LRULocalVideoDecoder(INPUT_NAME), copy_payload=True)(short_trajectories)
 
-    visualize_fg = VisualizeTrajectoryOnFrameGroup('trajectory')(raw_fg)
+    visualize_fg = VisualizeTrajectoryOnFrameGroup('trajectory', draw_box=True)(raw_fg)
 
     output = visualize_fg
     output_sub = output.subscribe()

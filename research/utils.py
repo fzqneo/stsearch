@@ -67,11 +67,11 @@ class VisualizeTrajectoryOnFrameGroup(Graph):
                 if self.draw_line:
                     vis_frame = cv2.line(vis_frame, tuple(p1), tuple(p2), color, thickness)
                 if self.draw_label:
-                    vis_frame = cv2.putText(vis_frame, str(j), tuple(p1), cv2.FONT_HERSHEY_SIMPLEX, 0.2, (0,255,0), 1, cv2.LINE_AA)
+                    vis_frame = cv2.putText(vis_frame, str(j), tuple(p1), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 1, cv2.LINE_AA)
 
             if self.draw_box:
                 for left, top, right, bottom in zip(Xmins, Ymins, Xmaxs, Ymaxs):
-                    vis_frame = cv2.rectangle(vis_frame, (left, top), (right, bottom), (0, 0, 255), 1)
+                    vis_frame = cv2.rectangle(vis_frame, (left, top), (right, bottom), (0, 0, 255), 3)
 
             # 2. Overlay it on all frames
             new_frames = []
