@@ -5,10 +5,13 @@ from logzero import logger
 import numpy as np
 from sklearn.cluster import KMeans
 
+# adapted idea fomr https://github.com/jguoaj/multi-object-tracking
+# but re-implemented. Result is worse than theirs.
+
 # params for ShiTomasi corner detection
 FEATURE_PARAMS = dict(
     maxCorners=50,
-    qualityLevel=0.2,
+    qualityLevel=0.3,
     minDistance=3,
     blockSize=7)
 
@@ -106,7 +109,8 @@ def estimate_box_translation(
         assert old_pts.shape == new_pts.shape
 
         # filter pts that are in the box
-        in_box_inds = (old_pts[:,0]>=xmin) & (old_pts[:,1]>=ymin) & (old_pts[:,0]<=xmax) & (old_pts[:,1]<=ymax)
+        MARGIN=2
+        in_box_inds = (old_pts[:,0]>=xmin-MARGIN) & (old_pts[:,1]>=ymin-MARGIN) & (old_pts[:,0]<=xmax+MARGIN) & (old_pts[:,1]<=ymax+MARGIN)
         old_pts = old_pts[in_box_inds]
         new_pts = new_pts[in_box_inds]
 
@@ -118,7 +122,18 @@ def estimate_box_translation(
 
         pts_shift = new_pts - old_pts
         median_shift = np.median(pts_shift, axis=0)
-        majority_inds = (pts_shift @ median_shift) >= 0
+
+        # choose majority that project positive onto median_shift
+        majority_inds = (pts_shift @ median_shift) > 0.0
+
+        # choose majority that's withink threshold difference  to median shift
+        # THRES = 3
+        # majority_inds = np.linalg.norm(pts_shift - median_shift, axis=1) <= THRES
+
+        # choose 1/2 pts closest to median
+        # diff_from_median = np.linalg.norm(pts_shift - median_shift, axis=1)
+        # majority_inds= diff_from_median <= np.median(diff_from_median)
+
         if np.count_nonzero(majority_inds) > 2:
             majority_old_pts = old_pts[majority_inds]
             majority_new_pts = new_pts[majority_inds]
@@ -139,8 +154,8 @@ def estimate_box_translation(
         #     majority_old_pts = old_pts[kmeans.labels_ == majority]
         #     majority_new_pts = new_pts[kmeans.labels_ == majority]
 
-        # M, mask = cv2.estimateAffinePartial2D(
-        M, mask = cv2.estimateAffine2D(
+        M, mask = cv2.estimateAffinePartial2D(
+        # M, mask = cv2.estimateAffine2D(
             majority_old_pts.reshape((-1,1,2)),
             majority_new_pts.reshape((-1,1,2)), 
             method=cv2.RANSAC)
@@ -150,10 +165,32 @@ def estimate_box_translation(
             new_bboxs.append([-1,-1,-1,-1])
             status.append(0)
         else:
+
+            # re-estimate a second time with stricter inliners
+            P_THRESH = 1.5
+            projection = cv2.transform(majority_old_pts.reshape((-1,1,2)), M).reshape((-1,1,2))
+            perror = np.linalg.norm(majority_new_pts - projection, axis=1)  # n_pts
+            inliner_inds = perror < P_THRESH
+            if np.count_nonzero(inliner_inds) >= 4:
+                M, mask = cv2.estimateAffinePartial2D(
+                    majority_old_pts[inliner_inds].reshape((-1,1,2)),
+                    majority_new_pts[inliner_inds].reshape((-1,2,2)),
+                    method=cv2.RANSAC
+                )
+
             # translate bbox
             src = np.array([[xmin, ymin], [xmax, ymax]])
             dst = cv2.transform(src.reshape((-1,1,2)), M)
             (new_xmin, new_ymin), (new_xmax, new_ymax) = dst.reshape((-1,2))
+
+            # # box size shouldn't change abruptly
+            # SIZE_CHANGE_THRESH = 1.5
+            # if not (1/SIZE_CHANGE_THRESH < abs(new_xmax-new_xmin) /  abs(xmax-xmin) < SIZE_CHANGE_THRESH and \
+            #     1/SIZE_CHANGE_THRESH < abs(new_ymax-new_ymin) / abs(ymax-ymin) < SIZE_CHANGE_THRESH):
+            #     # simply do mean shift can keep box size
+            #     new_xmin, new_ymin = median_shift + [xmin, ymin]
+            #     new_xmax, new_ymax = median_shift + [xmax, ymax]
+
             new_bboxs.append([new_xmin, new_ymin, new_xmax, new_ymax])
             status.append(1)
 

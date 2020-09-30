@@ -16,7 +16,7 @@ from stsearch.videolib import *
 
 from utils import VisualizeTrajectoryOnFrameGroup
 
-# cv2.setNumThreads(4)
+cv2.setNumThreads(4)
 
 # INPUT_NAME = "multi-object-tracking-2.mp4"
 INPUT_NAME = "example.mp4"
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     fps = 15
-    detect_every = 150
+    detect_every = 30
     
     all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
     sampled_frames = Slice(step=detect_every)(all_frames)
@@ -40,26 +40,26 @@ if __name__ == "__main__":
         trajectory_key='trajectory',
     )(detections)
 
-    # def trajectory_merge_predicate(i1, i2):
-    #     return meets_before(3)(i1, i2) \
-    #         and iou_at_least(0.3)(i1.payload['trajectory'][-1], i2.payload['trajectory'][0])
+    def trajectory_merge_predicate(i1, i2):
+        return meets_before(3)(i1, i2) \
+            and iou_at_least(0.3)(i1.payload['trajectory'][-1], i2.payload['trajectory'][0])
 
-    # def trajectory_payload_merge_op(p1, p2):
-    #     print(f"Merging two trajectories of lengths {len(p1['trajectory'])} and {len(p2['trajectory'])}")
-    #     return {'trajectory': p1['trajectory'] + p2['trajectory']}
+    def trajectory_payload_merge_op(p1, p2):
+        print(f"Merging two trajectories of lengths {len(p1['trajectory'])} and {len(p2['trajectory'])}")
+        return {'trajectory': p1['trajectory'] + p2['trajectory']}
 
-    # long_trajectories = Coalesce(
-    #     predicate=trajectory_merge_predicate,
-    #     bounds_merge_op=Bounds3D.span,
-    #     payload_merge_op=trajectory_payload_merge_op,
-    #     epsilon=1*detect_every
-    # )(short_trajectories)
+    long_trajectories = Coalesce(
+        predicate=trajectory_merge_predicate,
+        bounds_merge_op=Bounds3D.span,
+        payload_merge_op=trajectory_payload_merge_op,
+        epsilon=1*detect_every
+    )(short_trajectories)
 
-    # long_trajectories = Filter(
-    #     pred_fn=lambda intrvl: intrvl.bounds.length() >= fps * 5
-    # )(long_trajectories)
+    long_trajectories = Filter(
+        pred_fn=lambda intrvl: intrvl.bounds.length() >= fps * 5
+    )(long_trajectories)
 
-    raw_fg = VideoCropFrameGroup(LRULocalVideoDecoder(INPUT_NAME), copy_payload=True)(short_trajectories)
+    raw_fg = VideoCropFrameGroup(LRULocalVideoDecoder(INPUT_NAME), copy_payload=True)(long_trajectories)
 
     visualize_fg = VisualizeTrajectoryOnFrameGroup('trajectory', draw_box=True)(raw_fg)
 

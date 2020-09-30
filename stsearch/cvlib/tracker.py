@@ -185,13 +185,13 @@ class SORTTrackByDetection(Op):
         else:
             return False
 
+
 from .optical_flow import get_good_features_to_track, estimate_feature_translation, estimate_box_translation
 
-_DEBUG_VIS_OPTICAL = True  # requires a vis/ folder in working directory
+_DEBUG_VIS_OPTICAL = False  # requires a vis/ folder in working directory
 class TrackOpticalFlowFromBoxes(Graph):
 
-    # https://github.com/jguoaj/multi-object-tracking
-    # https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_video/py_lucas_kanade/py_lucas_kanade.html
+    # Ad https://github.com/jguoaj/multi-object-tracking
 
     def __init__(
         self, 
@@ -291,7 +291,7 @@ class TrackOpticalFlowFromBoxes(Graph):
                     vis_img = cv2.cvtColor(color_frame.copy(), cv2.COLOR_RGB2BGR)
                     for (a,b), (c,d) in zip(np.vstack(good_old_features), np.vstack(good_new_features)):
                         a, b, c, d = int(a), int(b), int(c), int(d)
-                        vis_img = cv2.circle(vis_img,(a,b),3, (255,0,0),-1)
+                        # vis_img = cv2.circle(vis_img,(a,b),3, (255,0,0),-1)
                         vis_img = cv2.circle(vis_img,(c,d),3, (0,255,0),-1)
                         vis_img = cv2.line(vis_img, (a,b), (c,d), (0,0,255), 2)
                     for xmin, ymin, xmax, ymax in old_bboxs:
