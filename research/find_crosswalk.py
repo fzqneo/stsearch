@@ -13,7 +13,7 @@ from rekall.bounds import Bounds3D
 from rekall.bounds.utils import bounds_intersect, bounds_span
 from rekall.predicates import _area, _height, _iou, _width, meets_before, iou_at_least, overlaps_before
 
-from stsearch.cvlib import Detection, DetectionFilter, DetectionFilterFlatten, TrackFromBox
+from stsearch.cvlib import *
 from stsearch.interval import *
 from stsearch.op import *
 from stsearch.stdlib import centroid, same_time
@@ -26,7 +26,12 @@ cv2.setNumThreads(4)
 logger.setLevel(logging.INFO)
 
 INPUT_NAME = "FifthCraig5_10m.mp4"
+# INPUT_NAME = "example.mp4"
+
 OUTPUT_DIR = Path(__file__).stem + "_output"
+
+USE_OPTICAL=True
+SAVE_VIDEO=False
 
 def traj_get_xy_array(L: List[Interval]) -> np.ndarray :
     return np.array([centroid(i) for i in L])
@@ -120,42 +125,65 @@ if __name__ == "__main__":
     logger.info(f"Video info: frame_count {decoder.frame_count}, fps {decoder.fps}, raw_width {decoder.raw_width}, raw_height {decoder.raw_height}")
     del decoder
 
-    detect_every = 8
+    detect_step = 15
     
     all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME, resize=600))()
-    sampled_frames = Slice(step=detect_every)(all_frames)
-    detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000, parallel=2)(sampled_frames)
-    crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
-    crop_cars = DetectionFilterFlatten(['car'], 0.5)(detections)
+    sampled_frames = Slice(step=detect_step)(all_frames)
+    detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000, parallel=4)(sampled_frames)
+
     
-    track_person_trajectories = TrackFromBox(
-        LRULocalVideoDecoder(INPUT_NAME, cache_size=450), 
-        detect_every, 
-        step=1,
-        trajectory_key='traj_person',
-        parallel_workers=12,
-        name='track_person')(crop_persons)
+    if USE_OPTICAL:
+        track_person_trajectories = TrackOpticalFlowFromBoxes(
+            get_boxes_fn=get_boxes_from_detection(['person',], 0.5),
+            step=1,
+            decoder=LRULocalVideoDecoder(INPUT_NAME, cache_size=900),
+            window=detect_step,
+            trajectory_key='traj_person',
+            parallel=8
+        )(detections)
 
-    track_car_trajectories = TrackFromBox(
-        LRULocalVideoDecoder(INPUT_NAME, cache_size=450), 
-        detect_every,
-        step=1,
-        trajectory_key='traj_car',
-        parallel_workers=24,
-        name='track_car')(crop_cars)
+        track_car_trajectories = TrackOpticalFlowFromBoxes(
+            get_boxes_fn=get_boxes_from_detection(['car',], 0.5),
+            step=1,
+            decoder=LRULocalVideoDecoder(INPUT_NAME, cache_size=900),
+            window=detect_step,
+            trajectory_key='traj_car',
+            parallel=8
+        )(detections)
+    
+    else:
+        # use expensive trackers
+        crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
+        crop_cars = DetectionFilterFlatten(['car'], 0.5)(detections)
 
-    merged_person_trajectories = CoalesceByLast(
+        track_person_trajectories = TrackFromBox(
+            LRULocalVideoDecoder(INPUT_NAME, cache_size=450), 
+            detect_step, 
+            step=1,
+            trajectory_key='traj_person',
+            parallel_workers=12,
+            name='track_person')(crop_persons)
+
+        track_car_trajectories = TrackFromBox(
+            LRULocalVideoDecoder(INPUT_NAME, cache_size=450), 
+            detect_step,
+            step=1,
+            trajectory_key='traj_car',
+            parallel_workers=24,
+            name='track_car')(crop_cars)
+
+    merged_person_trajectories = Coalesce(
         predicate=traj_concatable(3, 0.3, 'traj_person'),
         bounds_merge_op=Bounds3D.span,
         payload_merge_op=traj_concat_payload('traj_person'),
-        epsilon=1.1*detect_every
+        epsilon=3
     )(track_person_trajectories)
 
-    merged_car_trajectories = CoalesceByLast(
+    merged_car_trajectories = Coalesce(
         predicate=traj_concatable(3, 0.3, 'traj_car'),
         bounds_merge_op=Bounds3D.span,
         payload_merge_op=traj_concat_payload('traj_car'),
-        epsilon=1.1*detect_every
+        epsilon=3
     )(track_car_trajectories)
 
     long_person_trajectories = Filter(
@@ -169,40 +197,43 @@ if __name__ == "__main__":
     crosswalk_patches = JoinWithTimeWindow(
         predicate=is_crosswalk(),
         merge_op=crosswalk_merge('traj_person', 'traj_car'),
-        window=int(15*60*2),  # 2 min
+        window=int(fps*60*5),  # 2 min
         name="join_crosswalk"
     )(long_person_trajectories, long_car_trajectories)
 
-    vis_decoder = LRULocalVideoDecoder(INPUT_NAME, cache_size=900, resize=600)
-    # raw_fg = VideoCropFrameGroup(vis_decoder, copy_payload=True, parallel=4)(crosswalk_patches)
+    if SAVE_VIDEO:
+        vis_decoder = LRULocalVideoDecoder(INPUT_NAME, cache_size=900, resize=600)
+        raw_fg = VideoCropFrameGroup(vis_decoder, copy_payload=True, parallel=4)(crosswalk_patches)
 
-    # # visualizing on many frames is very expensive, so we hack to shorten each fg to only 2 seconds
-    # # comment this to get full visualization spanning both trajectories' times
-    # def shorten(fg):
-    #     fg.frames = fg.frames[:int(2*fps)]
-    #     return fg
-    # raw_fg = Map(map_fn=shorten)(raw_fg)
+        # # visualizing on many frames is very expensive, so we hack to shorten each fg to only 2 seconds
+        # # comment this to get full visualization spanning both trajectories' times
+        # def shorten(fg):
+        #     fg.frames = fg.frames[:int(2*fps)]
+        #     return fg
+        # raw_fg = Map(map_fn=shorten)(raw_fg)
 
-    # visualize_fg = VisualizeTrajectoryOnFrameGroup('traj_person', name="visualize-person-traj", parallel=4)(raw_fg)
-    # visualize_fg = VisualizeTrajectoryOnFrameGroup('traj_car', name="visualize-car-traj", parallel=4)(visualize_fg)
+        visualize_fg = VisualizeTrajectoryOnFrameGroup('traj_person', name="visualize-person-traj", parallel=4)(raw_fg)
+        visualize_fg = VisualizeTrajectoryOnFrameGroup('traj_car', name="visualize-car-traj", parallel=4)(visualize_fg)
+        output = visualize_fg
+    else:
+        output = crosswalk_patches
 
-    output = crosswalk_patches  # skip visualizing video for speed.
-    # output = visualize_fg
     output_sub = output.subscribe()
     output.start_thread_recursive()
 
     reference_frame = cv2.cvtColor(LocalVideoDecoder(INPUT_NAME, resize=600).get_frame(10), cv2.COLOR_RGB2BGR)
-    # for visualizing rect
+    # for visualizing box
     vis_rect = reference_frame.copy()
-    # for visualizing voting/heatmap
+    # for visualizing heatmap
     votes = np.zeros(reference_frame.shape[:2], dtype=np.int32)
 
     for k, intrvl in enumerate(output_sub):
 
-        # assert isinstance(intrvl, FrameGroupInterval)
-        # out_name = f"{OUTPUT_DIR}/{k}-{intrvl['t1']}-{intrvl['t2']}-{intrvl['x1']:.2f}-{intrvl['y1']:.2f}.mp4"
-        # intrvl.savevideo(out_name, fps=fps)
-        # logger.debug(f"saved {out_name}")
+        if SAVE_VIDEO:
+            assert isinstance(intrvl, FrameGroupInterval)
+            out_name = f"{OUTPUT_DIR}/{k}-{intrvl['t1']}-{intrvl['t2']}-{intrvl['x1']:.2f}-{intrvl['y1']:.2f}.mp4"
+            intrvl.savevideo(out_name, fps=fps)
+            logger.debug(f"saved {out_name}")
 
         # visualize box on vis_rect
         H, W = reference_frame.shape[:2]
@@ -220,10 +251,8 @@ if __name__ == "__main__":
     hm[np.nonzero(hm)] += 100   # clearly separate zero-vote
     hm = hm.astype(np.uint8)
     hm = cv2.applyColorMap(hm, cv2.COLORMAP_JET)
-    vis_hm = cv2.addWeighted(hm, 0.5, reference_frame, 0.5, 0)
+    vis_hm = cv2.addWeighted(hm, 0.3, reference_frame, 0.7, 0)
     cv2.imwrite(f"{OUTPUT_DIR}/crosswalk_hm.jpg", vis_hm)
-
-    logger.info(vis_decoder.cache.cache_info())
 
     logger.info(
         "This example tries to find crosswalks by finding where human trajectories intersect with car trajectories."

@@ -78,7 +78,7 @@ if __name__ == "__main__":
     crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
 
     track_trajectories = TrackFromBox(
-        LRULocalVideoDecoder(INPUT_NAME, cache_size=300), 
+        LRULocalVideoDecoder(INPUT_NAME, cache_size=600), 
         detect_every,
         name="track_person",
         parallel_workers=32

@@ -29,7 +29,7 @@ if __name__ == "__main__":
     
     all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
     sampled_frames = Slice(step=detect_every)(all_frames)
-    detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
+    detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000, parallel=2)(sampled_frames)
     crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
 
     short_trajectories = TrackFromBox(LRULocalVideoDecoder(INPUT_NAME), detect_every, parallel_workers=24)(crop_persons)
@@ -46,14 +46,14 @@ if __name__ == "__main__":
         predicate=trajectory_merge_predicate,
         bounds_merge_op=Bounds3D.span,
         payload_merge_op=trajectory_payload_merge_op,
-        epsilon=1.1*detect_every
+        epsilon=3
     )(short_trajectories)
 
     long_coalesced_persons = Filter(
         pred_fn=lambda intrvl: intrvl.bounds.length() >= fps * 5
     )(long_trajectories)
 
-    raw_fg = VideoCropFrameGroup(LRULocalVideoDecoder(INPUT_NAME), copy_payload=True)(long_coalesced_persons)
+    raw_fg = VideoCropFrameGroup(LRULocalVideoDecoder(INPUT_NAME, resize=600), copy_payload=True)(long_coalesced_persons)
 
     visualize_fg = VisualizeTrajectoryOnFrameGroup('trajectory')(raw_fg)
 

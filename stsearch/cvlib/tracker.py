@@ -13,7 +13,7 @@ from rekall.predicates import _height, _iou, _width
 from stsearch import Graph, Interval, Op
 from stsearch.cvlib.detection import DEFAULT_DETECTION_KEY
 from stsearch.op import Flatten, Map
-from stsearch.parallel import ParallelMap
+from stsearch.parallel import ParallelFlatten, ParallelFlatten
 from stsearch.third_party.sorttrack.sort import Sort as SORTTrack
 from stsearch.videolib import AbstractVideoDecoder, VideoFrameInterval
 
@@ -200,7 +200,8 @@ class TrackOpticalFlowFromBoxes(Graph):
         window, 
         step=1, 
         trajectory_key='trajectory',
-        name = None
+        name = None,
+        parallel=1,
         ):
 
         super().__init__()
@@ -212,6 +213,7 @@ class TrackOpticalFlowFromBoxes(Graph):
         self.step = step
         self.trajectory_key = trajectory_key
         self.name = name or f"{self.__class__.__name__}"
+        self.parallel = parallel
 
     def call(self, instream):
         decoder = self.decoder
@@ -321,4 +323,7 @@ class TrackOpticalFlowFromBoxes(Graph):
 
             return rv # end of flatten_fn
         
-        return Flatten(flatten_fn, self.name)(instream)
+        if self.parallel == 1:
+            return Flatten(flatten_fn, self.name)(instream)
+        else:
+            return ParallelFlatten(flatten_fn, self.name, max_workers=self.parallel)(instream)

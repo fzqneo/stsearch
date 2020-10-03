@@ -30,7 +30,7 @@ if __name__ == "__main__":
     
     all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
     sampled_frames = Slice(step=detect_every)(all_frames)
-    detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000)(sampled_frames)
+    detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000, parallel=4)(sampled_frames)
     crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
 
     # Both phash and BMHash are okay. Marr hash not so good.
@@ -78,9 +78,9 @@ if __name__ == "__main__":
         pred_fn=lambda intrvl: intrvl.bounds.length() >= fps * 5
     )(coalesced_persons)
 
-    raw_fg = VideoCropFrameGroup(LRULocalVideoDecoder(INPUT_NAME), copy_payload=True)(long_coalesced_persons)
+    raw_fg = VideoCropFrameGroup(LRULocalVideoDecoder(INPUT_NAME, resize=600), copy_payload=True)(long_coalesced_persons)
 
-    visualize_fg = VisualizeTrajectoryOnFrameGroup('trajectory')(raw_fg)
+    visualize_fg = VisualizeTrajectoryOnFrameGroup('trajectory', draw_label=False, draw_box=True)(raw_fg)
 
     output = visualize_fg
     output_sub = output.subscribe()

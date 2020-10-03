@@ -14,7 +14,7 @@ class VisualizeTrajectoryOnFrameGroup(Graph):
     def __init__(
         self, 
         trajectory_key='trajectory', parallel=1, 
-        draw_line=True, draw_label=True, draw_box=False,
+        draw_line=True, draw_label=False, draw_box=True,
         name=None):
         super().__init__()
         self.trajectory_key = trajectory_key

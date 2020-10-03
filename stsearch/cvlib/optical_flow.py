@@ -7,6 +7,7 @@ from sklearn.cluster import KMeans
 
 # adapted idea fomr https://github.com/jguoaj/multi-object-tracking
 # but re-implemented. Result is worse than theirs.
+# Reason seems to be optical flow.
 
 # params for ShiTomasi corner detection
 FEATURE_PARAMS = dict(
@@ -71,6 +72,8 @@ def estimate_feature_translation(
     p1, st, err = cv2.calcOpticalFlowPyrLK(
         img_old, img_new, p0.reshape((-1, 1, 2)), None, **LK_PARAMS)
 
+    if p1 is None:
+        return [np.empty((0,2)) for _ in box_features ],  [np.empty((0,2)) for _ in box_features ]
     p1 = p1.reshape((-1, 2))
     st = st.reshape((-1,))
     assert p0.shape == p1.shape
@@ -161,22 +164,28 @@ def estimate_box_translation(
             method=cv2.RANSAC)
 
         if np.count_nonzero(mask) <= 2:
-            logger.warn("Too few inliner in Affine estiamte")
+            # logger.warn("Too few inliner in Affine estiamte")
             new_bboxs.append([-1,-1,-1,-1])
             status.append(0)
         else:
 
             # re-estimate a second time with stricter inliners
             P_THRESH = 1.5
-            projection = cv2.transform(majority_old_pts.reshape((-1,1,2)), M).reshape((-1,1,2))
+            projection = cv2.transform(majority_old_pts.reshape((-1,1,2)), M).reshape((-1,2))
             perror = np.linalg.norm(majority_new_pts - projection, axis=1)  # n_pts
             inliner_inds = perror < P_THRESH
             if np.count_nonzero(inliner_inds) >= 4:
-                M, mask = cv2.estimateAffinePartial2D(
-                    majority_old_pts[inliner_inds].reshape((-1,1,2)),
-                    majority_new_pts[inliner_inds].reshape((-1,2,2)),
-                    method=cv2.RANSAC
-                )
+                try:
+                    M, mask = cv2.estimateAffinePartial2D(
+                        majority_old_pts[inliner_inds].reshape((-1,1,2)),
+                        majority_new_pts[inliner_inds].reshape((-1,1,2)),
+                        method=cv2.RANSAC
+                    )
+                except:
+                    print(majority_inds)
+                    print(majority_old_pts)
+                    print(majority_new_pts)
+                    raise
 
             # translate bbox
             src = np.array([[xmin, ymin], [xmax, ymax]])
