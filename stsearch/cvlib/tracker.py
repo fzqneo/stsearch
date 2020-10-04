@@ -13,7 +13,7 @@ from rekall.predicates import _height, _iou, _width
 from stsearch import Graph, Interval, Op
 from stsearch.cvlib.detection import DEFAULT_DETECTION_KEY
 from stsearch.op import Flatten, Map
-from stsearch.parallel import ParallelFlatten, ParallelFlatten
+from stsearch.parallel import ParallelFlatten, ParallelFlatten, ParallelMap
 from stsearch.third_party.sorttrack.sort import Sort as SORTTrack
 from stsearch.videolib import AbstractVideoDecoder, VideoFrameInterval
 
