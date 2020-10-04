@@ -77,7 +77,7 @@ def traj_concat_payload(key):
     return new_payload_op
 
 
-def is_crosswalk(key1='traj_person', key2='traj_car', degree=50):
+def is_crosswalk(key1='traj_person', key2='traj_car', degree=30):
 
     def new_pred(i1: Interval, i2: Interval) -> bool:
         if not 0.1 <= _iou(i1, i2) <= 0.6:  # hack
@@ -194,10 +194,20 @@ if __name__ == "__main__":
         pred_fn=lambda intrvl: intrvl.bounds.length() >= fps * 5
     )(merged_car_trajectories)
 
+
+    # de-dup car trajs
+    long_car_trajectories = Coalesce(
+        bounds_merge_op=Bounds3D.span,
+        payload_merge_op=lambda  p1, p2: p1,
+        predicate=iou_at_least(0.5),
+        epsilon=fps*60*5,
+    )(long_car_trajectories)
+
+
     crosswalk_patches = JoinWithTimeWindow(
         predicate=is_crosswalk(),
         merge_op=crosswalk_merge('traj_person', 'traj_car'),
-        window=int(fps*60*5),  # 2 min
+        window=frame_count,  
         name="join_crosswalk"
     )(long_person_trajectories, long_car_trajectories)
 
