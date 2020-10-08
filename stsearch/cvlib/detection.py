@@ -154,6 +154,7 @@ class DetectionFilterFlatten(Graph):
                         has_result = True
                         # create new patch
                         top, left, bottom, right = box  # TF return between 0~1
+                        # the following arithmetic should be correct even if `intrvl` is not full frame.
                         new_bounds = Bounds3D(
                             intrvl['t1'], intrvl['t2'],
                             intrvl['x1'] + intrvl.bounds.width() * left,

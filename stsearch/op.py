@@ -637,7 +637,7 @@ class JoinWithTimeWindow(Op):
         # should be output first
 
         while not (self.left_done and self.right_done):
-            if (len(self.result_buf) > 0
+            if (len(self.result_buf) > 0 and len(self.left_buf) > 0 and len(self.right_buf) > 0
                 and self.result_buf[0]['t1'] + self.window < self.left_buf[0]['t1']
                 and self.result_buf[0]['t1'] + self.window < self.right_buf[0]['t1']):
                 # we can release a result

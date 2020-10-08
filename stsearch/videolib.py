@@ -145,6 +145,7 @@ class FrameGroupInterval(Interval):
         logger.debug(f"VideoWrite fps={fps}, W={W}, H={H}")
         vw = cv2.VideoWriter(str(path), cv2_videowriter_fourcc, fps, (W,H))
         for im in self.frames:
+            im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
             vw.write(im)
         vw.release()
 
@@ -156,6 +157,18 @@ class FrameGroupInterval(Interval):
             data = f2.read()
         os.unlink(f.name)
         return data
+
+    def to_image_intervals(self) -> typing.List[ImageInterval]:
+        """Convert the frames to a list of root-less ImageInterval"""
+
+        rv = []
+        for ts, frame in zip(range(int(self['t1']), int(self['t2'])), self.frames):
+            new_bounds = self.bounds.copy()
+            new_bounds['t1'], new_bounds['t2'] = ts, ts+1
+            new_i = ImageInterval(new_bounds)
+            new_i.rgb = frame
+            rv.append(new_i)
+        return rv
 
 
 class AbstractVideoDecoder(object):
