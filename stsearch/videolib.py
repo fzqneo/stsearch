@@ -144,7 +144,7 @@ class FrameGroupInterval(Interval):
         H, W = self.frames[0].shape[:2]
         logger.debug(f"VideoWrite fps={fps}, W={W}, H={H}")
         vw = cv2.VideoWriter(str(path), cv2_videowriter_fourcc, fps, (W,H))
-        for im in self.frames:
+        for j, im in enumerate(self.frames):
             im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
             vw.write(im)
         vw.release()
@@ -345,11 +345,12 @@ class VideoToFrames(Op):
 
 
 class VideoCropFrameGroup(Graph):
-    def __init__(self, decoder, copy_payload=True, parallel=1):
+    def __init__(self, decoder, copy_payload=True, parallel=1, name=None):
         assert isinstance(decoder, AbstractVideoDecoder)
         self.decoder = decoder
         self.copy_payload = copy_payload
         self.parallel = parallel
+        self.name = name or f"{self.__class__.__name__}"
 
     def call(self, instream):
         def map_fn(intrvl):
@@ -360,16 +361,23 @@ class VideoCropFrameGroup(Graph):
 
             full_frames = self.decoder.get_frame_interval(intrvl['t1'], intrvl['t2'])
             H, W = full_frames[0].shape[:2]
+            H, W = int(H), int(W)
 
             # convert relative coordinate to absolute
             X1, X2 = int(intrvl['x1'] * W), int(intrvl['x2'] * W)
             Y1, Y2 = int(intrvl['y1'] * H), int(intrvl['y2'] * H)
+            # make sure they don't go out of bounds
+            if not 0 <= X1 <= X2 <= W and 0 <= Y1 <= Y2 <= H:
+                logger.warn(f"You're trying to crop out of bounds {[X1, X2, Y1, Y2]} from {[W, H]}")
+            X1, X2 = max(X1, 0), min(X2, W)
+            Y1, Y2 = max(Y1, 0), min(Y2, H)
+
             logger.debug(f"3D cropping: {intrvl['t1'], intrvl['t2'], X1, X2, Y1, Y2}")
             # perform spatial crop
             fg.frames =  [ frame[Y1:Y2, X1:X2, :] for frame in full_frames ]
             return fg
 
-        return ParallelMap(map_fn, name=self.__class__.__name__, max_workers=self.parallel)(instream)
+        return ParallelMap(map_fn, name=self.name, max_workers=self.parallel)(instream)
 
 
 class Crop(Graph):
