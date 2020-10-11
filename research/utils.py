@@ -30,6 +30,7 @@ class VisualizeTrajectoryOnFrameGroup(Graph):
         def visualize_map_fn(fg: FrameGroupInterval):
             assert isinstance(fg, FrameGroupInterval)
             assert tkey in fg.payload, f"{tkey} not found in {str(fg)}"
+            assert fg['t2'] - fg['t1'] == len(fg.frames)
 
             # 1. Draw all visualization on a frame with black background
             global_vis_frame = np.zeros_like(fg.frames[0])
@@ -77,11 +78,14 @@ class VisualizeTrajectoryOnFrameGroup(Graph):
             vis_ts_box = None
             for j, frame in enumerate(fg.frames):
                 frame = frame.copy()
+
+                ts = fg['t1'] + j
+                frame = cv2.putText(frame, f"F {ts}", (50,50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1, cv2.LINE_AA)
+
                 assert global_vis_frame.shape == frame.shape, f"{j} {global_vis_frame.shape} {frame.shape}"
                 frame[global_vis_frame > 0] = global_vis_frame[global_vis_frame > 0] 
 
                 if self.draw_box:
-                    ts = fg['t1'] + j
                     for b in boxs_to_draw:
                         if ts == b[0]:
                             vis_ts_box = b
