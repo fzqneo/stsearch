@@ -2,6 +2,7 @@ import collections
 import functools
 import heapq
 from logzero import logger
+import operator
 import threading
 import typing
 import uuid
@@ -782,3 +783,48 @@ class AntiJoinWithTimeWindow(Op):
 
 # alias
 AntiJoin = AntiJoinWithTimeWindow
+
+
+class BoundedSort(Op):
+    """Sort with bounded disorder.
+    Assumes the key `X` will not appear after the key `X+window`.
+    The key must support + and <.
+    """
+
+    def __init__(self, window=900, key_fn=operator.itemgetter('t1'), name=None):
+        super().__init__(name)
+        self.window = window
+        self.key_fn = key_fn
+
+        self.done = False
+        self.counter = 0
+        self.heap = []  # heap element is (key, seq, interval)
+        self.last_key = None
+
+    def call(self, instream):
+        self.instream = instream
+
+    def execute(self):
+        
+        # when we need to pull from upstream
+        while not self.done and \
+            (self.last_key is None or self.last_key <= self.heap[0][0] + self.window):
+            i1 = self.instream.get()
+            if i1 is None:
+                self.done = True
+                break
+            else:
+                key1 = self.key_fn(i1)
+                heapq.heappush(self.heap, (key1, self.counter, i1))
+                self.counter += 1
+                self.last_key = key1
+
+        if len(self.heap) > 0:
+            _, _, intrvl = heapq.heappop(self.heap)
+            print("releasing", intrvl, "\nheap:", self.heap)
+            self.publish(intrvl)
+            return True
+        else:
+            return False
+
+Sort = BoundedSort

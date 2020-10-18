@@ -652,3 +652,46 @@ class TestParallelMap(OpTestCase):
             [intrvl.payload['msg'] for intrvl in results],
             ["hello bravo!", "world bravo!", "hello world bravo!"]
         )
+
+
+
+class TestSort(OpTestCase):
+
+    intrvl_list_1 = [
+        Interval(Bounds3D(0, 10)),
+        Interval(Bounds3D(20, 30)),
+        Interval(Bounds3D(40, 50)),
+    ]
+
+    intrvl_list_2 = [
+        Interval(Bounds3D(20, 30)),
+        Interval(Bounds3D(40, 50)),
+        Interval(Bounds3D(0, 10)),
+    ]
+
+    def test_basic(self):
+        output = BoundedSort()(
+            FromIterable(self.intrvl_list_2)()
+        )
+        results = run_to_finish(output)
+        self.assertIntervalListEq(
+            results,
+            self.intrvl_list_1
+        )
+
+    def test_small_window(self):
+        # the given window is smaller than what the input satisfies
+        # thus it won't wait for t1=0 before releasing t1=20 
+        output = BoundedSort(window=10)(
+            FromIterable(self.intrvl_list_2)()
+        )
+        results = run_to_finish(output)
+
+        expected = [
+            Interval(Bounds3D(20, 30)), # pre-mature release
+            Interval(Bounds3D(0, 10)),
+            Interval(Bounds3D(40, 50)),
+        ]
+            
+        self.assertIntervalListEq(results, expected)
+
