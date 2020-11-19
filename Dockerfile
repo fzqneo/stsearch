@@ -5,6 +5,7 @@ RUN apt-get update --fix-missing \
         gcc \
         g++ \
         libcurl4-openssl-dev \
+        libgl1-mesa-glx \
         libssl-dev \
         python3-dev \
     && apt-get clean
@@ -13,7 +14,7 @@ RUN  conda install -c conda-forge m2crypto \
     && pip install  --no-cache-dir \
         logzero \
         mmh3 \
-        opencv-python==4.2.0.34 \
+        opencv-contrib-python>=4.2.0.0 \
         opendiamond[DIAMONDD]==10.1.0 \
         protobuf==3.12.4 \
         pycurl \
