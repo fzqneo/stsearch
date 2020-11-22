@@ -2,7 +2,9 @@
 It intends to provide STSearch functionality in an existing OpenDiamond system.
 """
 
+import gc
 import io
+import multiprocessing
 import os
 import pickle
 import tempfile
@@ -59,6 +61,7 @@ class STSearchFilter(Filter):
             self.query_fn = query_fn
 
     def __call__(self, obj):
+        gc.collect()
         # get obj data
         tic = time.time()
         _ = obj.data

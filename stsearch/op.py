@@ -103,6 +103,7 @@ class Op(object):
             pass
         self.publish(None)
         logger.info(f"{self.name} terminating loop.")
+        return
 
     def start_thread(self):
         if not self.started:
