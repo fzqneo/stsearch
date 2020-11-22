@@ -2,5 +2,6 @@ example/*
 rekall/*
 test/*
 research/*
+virat_experiment/*
 !test/*.py
 .git/*

@@ -12,6 +12,7 @@ RUN apt-get update --fix-missing \
 
 RUN  conda install -c conda-forge m2crypto \
     && pip install  --no-cache-dir \
+        filterpy==1.4.5 \
         logzero \
         mmh3 \
         opencv-contrib-python>=4.2.0.0 \
@@ -20,6 +21,8 @@ RUN  conda install -c conda-forge m2crypto \
         pycurl \
         pyyaml==5.3.1 \
         rekallpy==0.3.2 \
+        scikit-image==0.17.2 \
+        scikit-learn==0.23.2 \
         simplejson \
     && conda clean --all -y
 
