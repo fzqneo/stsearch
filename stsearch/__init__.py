@@ -1,3 +1,3 @@
 from .interval import Interval
-from .invertal_stream import IntervalStream, IntervalStreamSubscriber
+from .interval_stream import IntervalStream, IntervalStreamSubscriber
 from .op import Graph, Op

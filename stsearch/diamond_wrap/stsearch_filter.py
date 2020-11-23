@@ -69,18 +69,32 @@ class STSearchFilter(Filter):
 
         # save obj to tempfile
         tic = time.time()
-        f = tempfile.NamedTemporaryFile('wb', suffix='.mp4', prefix='STSearchFilter-', delete=False)
-        f.write(obj.data)
-        f.close()
+        tmpf = tempfile.NamedTemporaryFile('wb', suffix='.mp4', prefix='STSearchFilter-', delete=False)
+        tmpf.write(obj.data)
+        tmpf.close()
         save_time = time.time() - tic
+
 
         # init and execute query, buffer all results
         tic = time.time()
-        query_result = self.query_fn(f.name, session=self.session)
+        self.session.log('info', f"starting query() working on {tmpf.name}")
+
+        # use mp to workaround memory leaks in OpenCV
+        def child_f(path, query_fn, conn):
+            conn.send(query_fn(path, None))
+            conn.close()
+
+        parent_conn, child_conn = multiprocessing.Pipe()
+        p = multiprocessing.Process(target=child_f, args=(tmpf.name, self.query_fn, child_conn))
+        p.start()
+        query_result = parent_conn.recv()
+        p.join()
+        # query_result = self.query_fn(tmpf.name, session=self.session)
+        self.session.log('info', f"query() done on {tmpf.name}")
         query_time = time.time() - tic
 
         # delete tempfile
-        os.unlink(f.name)
+        os.unlink(tmpf.name)
 
         tic = time.time()
         query_result_serialized = pickle.dumps(query_result)

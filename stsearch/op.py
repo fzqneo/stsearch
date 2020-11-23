@@ -12,7 +12,7 @@ from rekall.bounds import Bounds, Bounds3D
 from rekall.predicates import *
 
 from stsearch.interval import Interval
-from stsearch.invertal_stream import IntervalStream, IntervalStreamSubscriber
+from stsearch.interval_stream import IntervalStream, IntervalStreamSubscriber
 
 class Graph(object):
     """
