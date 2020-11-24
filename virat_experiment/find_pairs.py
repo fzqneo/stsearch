@@ -138,6 +138,7 @@ if __name__ == "__main__":
 
     tic = time.time()
 
+    print("starting search")
     results = start_stsearch_by_script(open(__file__, 'rb').read())
 
     for i, res in enumerate(results):

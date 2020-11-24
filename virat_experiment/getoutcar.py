@@ -84,11 +84,23 @@ def query(path, session):
     stopped_cars = Coalesce(
         predicate=iou_at_least(0.5),
         bounds_merge_op=Bounds3D.span,
+        payload_merge_op=lambda p1, p2: {}, # drop the rgb
         epsilon=detect_step*3
     )(stopped_cars)
 
     stopped_cars = Filter(pred_fn=lambda i: i.bounds.length() >= 3*fps)(stopped_cars)
 
+    # buffer all stopped cars
+    stopped_cars_sub = stopped_cars.subscribe()
+    stopped_cars.start_thread_recursive()
+    buffered_stopped_cars = list(stopped_cars_sub)
+
+    logger.info(f"Find {len(buffered_stopped_cars)} stopped cars.")
+    query_result['stopped_cars'] = len(buffered_stopped_cars)
+
+    # Stage 2: reprocess buffered stopped cars
+    gc.collect()
+    stopped_cars_1 = FromIterable(buffered_stopped_cars)()
     def dilate_car(icar: Interval) -> Interval:
         carh, carw = _height(icar), _width(icar)
         new_bounds = Bounds3D(
@@ -101,12 +113,22 @@ def query(path, session):
         )
         return Interval(new_bounds)
 
-    redetect_volumnes = Map(dilate_car)(stopped_cars)
+    dialted_stopped_cars = Map(dilate_car)(stopped_cars_1)
 
-    redetect_fg = VideoCropFrameGroup(LRULocalVideoDecoder(path, cache_size=900), name="crop_redetect_volume")(redetect_volumnes)
+    # sample single-frame bounds from redetect_volumnes for object detection
+    redetect_bounds = Flatten(
+        flatten_fn=lambda i: \
+            [
+                Interval(Bounds3D(t1, t1+1, i['x1'], i['x2'], i['y1'], i['y2'])) \
+                for t1 in range(int(i['t1']), int(i['t2']), detect_step) 
+            ]
+    )(dialted_stopped_cars)
+    redetect_bounds = Sort(window=frame_count)(redetect_bounds)
+
+    redetect_fg = VideoCropFrameGroup(LRULocalVideoDecoder(path, cache_size=900), name="crop_redetect_volume")(redetect_bounds)
     
     redetect_patches = Flatten(
-        flatten_fn=lambda fg: fg.to_image_intervals()[::detect_step]
+        flatten_fn=lambda fg: fg.to_image_intervals()
     )(redetect_fg)
     redetect_detection = Detection(server_list=DETECTION_SERVERS, parallel=2)(
          Slice(step=detect_step)(redetect_patches)
@@ -131,22 +153,6 @@ def query(path, session):
         epsilon=3*detect_step
     )(short_person_trajectories)
 
-    def interval_merge_op_1(i1, i2):
-        new_bounds = i1.bounds.span(i2)
-        new_payload = i1.payload.copy()
-
-        if rekey not in new_payload:
-            new_payload[rekey] = [i1, ]
-        new_payload[rekey].append(i2)
-        return Interval(new_bounds, new_payload)
-
-    redetect_person_traj = CoalesceByLast(
-        predicate=iou_at_least(0.3),
-        interval_merge_op=interval_merge_op_1,
-        epsilon=5
-    )(redetect_person)
-    redetect_person_traj = Filter(lambda i: i.bounds.length() > fps)(redetect_person_traj)
-
     def merge_op_getout(ic, ip):
         new_bounds = ic.bounds.span(ip)
         new_bounds['t1'] = max(0, ip['t1'] - fps)
@@ -155,11 +161,9 @@ def query(path, session):
         return Interval(new_bounds, new_payload)
 
     get_out = JoinWithTimeWindow(
-        # lambda ic, ip: ic['t1'] < ip['t1'] < ic['t2'] \
-            # and np.linalg.norm(centroid(ic) - centroid(ip.payload[rekey][0])) < _height(ic), 
         lambda ic, ip: ic['t1'] < ip['t1'] < ic['t2'] and _iou(ic, ip.payload[rekey][0]) > 0.05,
         merge_op=merge_op_getout
-    )(stopped_cars, long_person_trajectories)
+    )(FromIterable(buffered_stopped_cars)(), long_person_trajectories)
 
 
     vis_decoder = LRULocalVideoDecoder(path, cache_size=900)
@@ -170,10 +174,10 @@ def query(path, session):
     output.start_thread_recursive()
 
     for _, intrvl in enumerate(output_sub):
+        # query_result['results'].append((intrvl.bounds, b''))
         query_result['results'].append((intrvl.bounds.copy(), intrvl.get_mp4()))
         del intrvl
         gc.collect()
-        # query_result['results'].append((intrvl.bounds, b''))
 
     return query_result
 
@@ -198,8 +202,10 @@ if __name__ == "__main__":
         filter_result: STSearchResult = STSearchResult()
         filter_result.ParseFromString(res[OUTPUT_ATTR])
         query_result = pickle.loads(filter_result.query_result)
-        print(f"{clip_id}, {filter_result.stats}, {query_result['metadata']}. #={len(query_result['results'])}")
+        print(f"{clip_id}, {filter_result.stats}, {query_result['metadata']}. stopped car={query_result['stopped_cars']}. #={len(query_result['results'])}")
         for b, mp4 in query_result['results']:
             open(f"getoutcar_{clip_id}_{b['t1']}_{b['t2']}.mp4", 'wb').write(mp4)
 
 
+# agra freezes on VIRAT_S_050300_06_001427_001616. Deadlock by stopped_cars!
+# VIRAT_S_000203_04_000903_001086.mp4 on brolette

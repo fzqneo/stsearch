@@ -822,7 +822,7 @@ class BoundedSort(Op):
 
         if len(self.heap) > 0:
             _, _, intrvl = heapq.heappop(self.heap)
-            print("releasing", intrvl, "\nheap:", self.heap)
+            # print("releasing", intrvl, "\nheap:", self.heap)
             self.publish(intrvl)
             return True
         else:

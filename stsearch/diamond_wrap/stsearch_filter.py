@@ -34,13 +34,10 @@ class STSearchFilter(Filter):
     def __init__(self, args, blob, session=Session('filter')):
         super().__init__(args, blob, session)
 
-        self.scriptdir = None
+        self.scriptdir = tempfile.TemporaryDirectory(prefix='stsearch-script-')
 
         if self.mode == 'zip':
-            # the zip mode have the side effect of changing cwd of the current processs
-            
-            # create temp dir and cwd to it
-            self.scriptdir = tempfile.TemporaryDirectory(prefix='stsearch-filter-zip-mode-')
+            # the zip mode have the side effect of changing cwd of the current processs            
             os.chdir(self.scriptdir.name)
             self.session.log('info', f"Zip mode running at {self.scriptdir.name}")
             
@@ -59,6 +56,9 @@ class STSearchFilter(Filter):
             query_fn = get_query_fn(self.blob)
             assert callable(query_fn)
             self.query_fn = query_fn
+            # just for debug
+            with tempfile.NamedTemporaryFile(prefix="autosave-script-", suffix=".py", dir=self.scriptdir.name, delete=False) as f1:
+                f1.write(self.blob)
 
     def __call__(self, obj):
         gc.collect()
