@@ -61,8 +61,8 @@ def query(path, session):
     query_result['metadata'] = {
         'fps': fps,
         'frame_count': frame_count,
-        'raw_w': decoder.raw_width,
-        'raw_h': decoder.raw_height,
+        'width': decoder.raw_width,
+        'height': decoder.raw_height,
     }
     query_result['results'] = list()
     del decoder
@@ -187,6 +187,7 @@ if __name__ == "__main__":
     import pickle
     import time
 
+    import pandas as pd 
     from stsearch.diamond_wrap.result_pb2 import STSearchResult
     from utils import start_stsearch_by_script, OUTPUT_ATTR
 
@@ -194,7 +195,10 @@ if __name__ == "__main__":
 
     results = start_stsearch_by_script(open(__file__, 'rb').read())
 
+    save_results= []
+
     for i, res in enumerate(results):
+        # each `res` corresponds to results of a clip_id
         print(f"=> Result {i}. Time {(time.time()-tic)/60:.1f} min.")
         object_id = res['_ObjectID'].decode()
         clip_id = Path(object_id).stem
@@ -202,10 +206,27 @@ if __name__ == "__main__":
         filter_result: STSearchResult = STSearchResult()
         filter_result.ParseFromString(res[OUTPUT_ATTR])
         query_result = pickle.loads(filter_result.query_result)
-        print(f"{clip_id}, {filter_result.stats}, {query_result['metadata']}. stopped car={query_result['stopped_cars']}. #={len(query_result['results'])}")
+        metadata = query_result['metadata']
+        print(f"{clip_id}, {filter_result.stats}, {metadata}. stopped car={query_result['stopped_cars']}. #={len(query_result['results'])}")
         for b, mp4 in query_result['results']:
             open(f"getoutcar_{clip_id}_{b['t1']}_{b['t2']}.mp4", 'wb').write(mp4)
 
+            save_results.append(
+                {
+                    'clip_id': clip_id,
+                    't1': b['t1'],
+                    't2': b['t2'],
+                    'x1': b['x1'],
+                    'x2': b['x2'],
+                    'y1': b['y1'],
+                    'y2': b['y2'],
+                    'frame_count': metadata['frame_count'],
+                    'fps': metadata['fps'],
+                    'width': metadata['width'],
+                    'height': metadata['height'],
+                }
+            )
 
-# agra freezes on VIRAT_S_050300_06_001427_001616. Deadlock by stopped_cars!
-# VIRAT_S_000203_04_000903_001086.mp4 on brolette
+        # save after getting each clip so that we don't lose all in case of failure
+        pd.DataFrame(save_results).to_csv("getoutcar.csv")
+
