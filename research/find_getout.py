@@ -1,3 +1,4 @@
+import gc
 import logging
 import itertools
 import os
@@ -23,16 +24,15 @@ from stsearch.videolib import *
 from utils import VisualizeTrajectoryOnFrameGroup
 
 cv2.setNumThreads(4)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
-INPUT_NAME = "find_getout_candidate/12-8450-9021-0.51-0.10.mp4"
-# INPUT_NAME = "VIRAT_getin.mp4"
+# INPUT_NAME = "find_getout_candidate/12-8450-9021-0.51-0.10.mp4"
+INPUT_NAME = "VIRAT_getin.mp4"
 OUTPUT_DIR = Path(__file__).stem + "_output"
 
 DETECTION_SERVERS = ['cloudlet031.elijah.cs.cmu.edu:5000', 'cloudlet031.elijah.cs.cmu.edu:5001']
 
 SAVE_VIDEO=True
-
 
 class Log(Graph):
 
@@ -58,9 +58,14 @@ def traj_concatable(epsilon, iou_thres, key='trajectory'):
     """
 
     def new_pred(i1: Interval, i2: Interval) -> bool:
-        return i1['t1'] < i2['t1'] \
+        logger.debug(f"Checking two trajs: {i1.bounds}, {i2.bounds}")
+        logger.debug(f"i1: from {i1.payload[key][0].bounds} to {i1.payload[key][-1].bounds}")
+        logger.debug(f"i2: from {i2.payload[key][0].bounds} to {i2.payload[key][-1].bounds}")
+        rv = i1['t1'] < i2['t1'] \
             and meets_before(epsilon)(i1, i2) \
             and iou_at_least(iou_thres)(i1.payload[key][-1], i2.payload[key][0])
+        logger.debug(f"result: {rv}")
+        return rv
 
     return new_pred
 
@@ -73,19 +78,27 @@ def traj_concat_payload(key):
     return new_payload_op
 
 
-if __name__ == "__main__":
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+def query(path, session):
+    cv2.setNumThreads(8)
+    
+    query_result = {}
 
-    decoder = LocalVideoDecoder(INPUT_NAME)
+    decoder = LocalVideoDecoder(path)
     frame_count, fps = decoder.frame_count, int(np.round(decoder.fps))
-    logger.info(f"Video info: frame_count {decoder.frame_count}, fps {decoder.fps}, raw_width {decoder.raw_width}, raw_height {decoder.raw_height}")
+    query_result['metadata'] = {
+        'fps': fps,
+        'frame_count': frame_count,
+        'width': decoder.raw_width,
+        'height': decoder.raw_height,
+    }
+    query_result['results'] = list()
     del decoder
 
-    detect_step = 10
+    detect_step = int(fps)
     
-    all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
-    sampled_frames = Slice(step=detect_step, end=int(5*60*fps))(all_frames)
-    detections = Detection(server_list=DETECTION_SERVERS, parallel=4)(sampled_frames)
+    all_frames = VideoToFrames(LocalVideoDecoder(path))()
+    sampled_frames = Slice(end=5*60*30, step=detect_step)(all_frames)
+    detections = Detection(server_list=DETECTION_SERVERS, parallel=2)(sampled_frames)
 
     crop_cars = DetectionFilterFlatten(['car'], 0.5)(detections)
     stopped_cars = Coalesce(
@@ -94,18 +107,27 @@ if __name__ == "__main__":
         epsilon=detect_step*3
     )(crop_cars)
 
-    stopped_cars = Log("stopped_cars")(stopped_cars)
-
     # further de-dup as detection boxes can be flashy
     stopped_cars = Coalesce(
         predicate=iou_at_least(0.5),
         bounds_merge_op=Bounds3D.span,
+        payload_merge_op=lambda p1, p2: {}, # drop the rgb
         epsilon=detect_step*3
     )(stopped_cars)
-    stopped_cars = Log("dedup_stopped_cars")(stopped_cars)
 
     stopped_cars = Filter(pred_fn=lambda i: i.bounds.length() >= 3*fps)(stopped_cars)
 
+    # buffer all stopped cars
+    stopped_cars_sub = stopped_cars.subscribe()
+    stopped_cars.start_thread_recursive()
+    buffered_stopped_cars = list(stopped_cars_sub)
+
+    logger.info(f"Find {len(buffered_stopped_cars)} stopped cars. {list(c.bounds for c in buffered_stopped_cars)}")
+    query_result['stopped_cars'] = len(buffered_stopped_cars)
+
+    # Stage 2: reprocess buffered stopped cars
+    gc.collect()
+    stopped_cars_1 = FromIterable(buffered_stopped_cars)()
     def dilate_car(icar: Interval) -> Interval:
         carh, carw = _height(icar), _width(icar)
         new_bounds = Bounds3D(
@@ -118,90 +140,80 @@ if __name__ == "__main__":
         )
         return Interval(new_bounds)
 
-    redetect_volumnes = Map(dilate_car)(stopped_cars)
-    redetect_volumnes = Log("redetect_volumes")(redetect_volumnes)
-    redetect_fg = VideoCropFrameGroup(LRULocalVideoDecoder(INPUT_NAME, cache_size=900), name="crop_redetect_volume")(redetect_volumnes)
+    dialted_stopped_cars = Map(dilate_car)(stopped_cars_1)
+
+    # sample single-frame bounds from redetect_volumnes for object detection
+    redetect_bounds = Flatten(
+        flatten_fn=lambda i: \
+            [
+                Interval(Bounds3D(t1, t1+1, i['x1'], i['x2'], i['y1'], i['y2'])) \
+                for t1 in range(int(i['t1']), int(i['t2']), detect_step) 
+            ]
+    )(dialted_stopped_cars)
+    redetect_bounds = Sort(window=frame_count)(redetect_bounds)
+
+    redetect_fg = VideoCropFrameGroup(LRULocalVideoDecoder(path, cache_size=900), name="crop_redetect_volume")(redetect_bounds)
     
     redetect_patches = Flatten(
         flatten_fn=lambda fg: fg.to_image_intervals()
     )(redetect_fg)
-    redetect_detection = Detection(server_list=DETECTION_SERVERS, parallel=4)(
-         Slice(step=detect_step)(redetect_patches)
-    )
-    redetect_person = DetectionFilterFlatten(['person'], 0.3)(redetect_detection)
+
+    redetect_patches = Log("redetect_patches")(redetect_patches)
+
+    # we already sample when generating `redetect_bounds`. Don't sample again here.
+    redetect_detection = Detection(server_list=DETECTION_SERVERS, parallel=2)(redetect_patches) 
+    redetect_person = DetectionFilterFlatten(['person'], 0.1)(redetect_detection)
 
     redetect_person = Log("redetect_person")(redetect_person)
-    
+
     rekey = 'traj_person'
 
     short_person_trajectories = TrackFromBox(
-        LRULocalVideoDecoder(INPUT_NAME, cache_size=900), 
+        LRULocalVideoDecoder(path, cache_size=900), 
         window=detect_step, 
-        step=1,
+        step=2,
         trajectory_key=rekey,
-        parallel_workers=24,
+        parallel_workers=2,
         name='track_person')(redetect_person)
 
-    short_person_trajectories = Log("short_person_trajectories")(short_person_trajectories)
-
     long_person_trajectories = Coalesce(
-        predicate=traj_concatable(detect_step*2, 0.1, rekey),
+        predicate=traj_concatable(detect_step*2, 0.01, rekey),
         bounds_merge_op=Bounds3D.span,
         payload_merge_op=traj_concat_payload(rekey),
-        distance=lambda i1, i2: _iou(i1.payload[rekey][-1], i2),
+        # distance=lambda i1, i2: _iou(i1.payload[rekey][-1], i2.payload[rekey][0]),
         epsilon=3*detect_step
     )(short_person_trajectories)
 
-    # long_person_trajectories = Filter(
-    #     lambda i: i.bounds.length() >= fps
-    # )(long_person_trajectories)
-
-    def interval_merge_op_1(i1, i2):
-        new_bounds = i1.bounds.span(i2)
-        new_payload = i1.payload.copy()
-
-        if rekey not in new_payload:
-            new_payload[rekey] = [i1, ]
-        new_payload[rekey].append(i2)
+    def merge_op_getout(ic, ip):
+        new_bounds = ic.bounds.span(ip)
+        # new_bounds['t1'] = max(0, ip['t1'] - 10*fps) # wind back 3 seconds
+        # new_bounds['t2'] = min(frame_count, ip['t1'] + 10*fps)
+        new_payload = {rekey: ip.payload[rekey]}
         return Interval(new_bounds, new_payload)
 
-    redetect_person_traj = CoalesceByLast(
-        predicate=iou_at_least(0.3),
-        interval_merge_op=interval_merge_op_1,
-        epsilon=5
-    )(redetect_person)
-    redetect_person_traj = Filter(lambda i: i.bounds.length() > fps)(redetect_person_traj)
+    # get_out = JoinWithTimeWindow(
+    #     lambda ic, ip: ic['t1'] < ip['t1'] < ic['t2'] and _iou(ic, ip.payload[rekey][0]) > 0.01,
+    #     merge_op=merge_op_getout
+    # )(FromIterable(buffered_stopped_cars)(), long_person_trajectories)
 
-    def merge_op_getout(i1, i2):
-        new_bounds = i1.bounds.span(i2)
-        new_payload = {rekey: i2.payload[rekey]}
-        return Interval(new_bounds, new_payload)
+    get_out = long_person_trajectories
 
-    get_out = JoinWithTimeWindow(
-        # lambda ic, ip: ic['t1'] < ip['t1'] < ic['t2'] \
-            # and np.linalg.norm(centroid(ic) - centroid(ip.payload[rekey][0])) < _height(ic), 
-        lambda ic, ip: ic['t1'] < ip['t1'] < ic['t2'] and _iou(ic, ip.payload[rekey][0]) > 0.01,
-        merge_op=merge_op_getout
-    )(stopped_cars, long_person_trajectories)
-
-
-    if SAVE_VIDEO:
-        vis_decoder = LRULocalVideoDecoder(INPUT_NAME, cache_size=900, resize=600)
-        raw_fg = VideoCropFrameGroup(vis_decoder, copy_payload=True)(get_out)
-        visualize_fg = VisualizeTrajectoryOnFrameGroup(rekey, name="visualize-person-traj")(raw_fg)
-        output = visualize_fg
-
-    else:
-        output = redetect_volumnes
+    vis_decoder = LRULocalVideoDecoder(path, cache_size=900)
+    raw_fg = VideoCropFrameGroup(vis_decoder, copy_payload=True)(get_out)
+    visualize_fg = VisualizeTrajectoryOnFrameGroup(rekey, name="visualize-person-traj")(raw_fg)
+    output = visualize_fg
 
     output_sub = output.subscribe()
     output.start_thread_recursive()
 
     for k, intrvl in enumerate(output_sub):
+        assert isinstance(intrvl, FrameGroupInterval)
+        out_name = f"{OUTPUT_DIR}/{k}-{intrvl['t1']}-{intrvl['t2']}-{intrvl['x1']:.2f}-{intrvl['y1']:.2f}-{intrvl['x2']:.2f}-{intrvl['y2']:.2f}.mp4"
+        intrvl.savevideo(out_name, fps=fps)
+        logger.info(f"saved {out_name}")
 
-        if SAVE_VIDEO:
-            assert isinstance(intrvl, FrameGroupInterval)
-            out_name = f"{OUTPUT_DIR}/{k}-{intrvl['t1']}-{intrvl['t2']}-{intrvl['x1']:.2f}-{intrvl['y1']:.2f}-{intrvl['x2']:.2f}-{intrvl['y2']:.2f}.mp4"
-            intrvl.savevideo(out_name, fps=fps)
-            logger.info(f"saved {out_name}")
 
+
+if __name__ == "__main__":
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    query(INPUT_NAME, None)

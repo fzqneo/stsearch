@@ -12,7 +12,7 @@ from numpy.linalg import norm
 
 from rekall.bounds import Bounds3D
 from rekall.bounds.utils import bounds_intersect, bounds_span
-from rekall.predicates import _area, _height, _iou, _width, length_at_least, meets_before, iou_at_least, overlaps_before
+from rekall.predicates import _area, _height, _iou, _width, meets_before, iou_at_least, overlaps_before
 
 from stsearch.cvlib import *
 from stsearch.interval import *
@@ -37,7 +37,7 @@ def traj_concatable(epsilon, iou_thres, key='trajectory'):
 
     def new_pred(i1: Interval, i2: Interval) -> bool:
         return i1['t1'] < i2['t1'] \
-            and meets_before(epsilon)(i1, i2) \
+            and abs(i1['t2'] - i2['t1']) < epsilon \
             and iou_at_least(iou_thres)(i1.payload[key][-1], i2.payload[key][0])
 
     return new_pred
@@ -130,10 +130,9 @@ def query(path, session):
     redetect_patches = Flatten(
         flatten_fn=lambda fg: fg.to_image_intervals()
     )(redetect_fg)
-    redetect_detection = Detection(server_list=DETECTION_SERVERS, parallel=2)(
-         Slice(step=detect_step)(redetect_patches)
-    )
-    redetect_person = DetectionFilterFlatten(['person'], 0.3)(redetect_detection)
+    # Don't sample again here
+    redetect_detection = Detection(server_list=DETECTION_SERVERS, parallel=2)(redetect_patches)
+    redetect_person = DetectionFilterFlatten(['person'], 0.1)(redetect_detection)
 
     rekey = 'traj_person'
 
@@ -142,26 +141,31 @@ def query(path, session):
         window=detect_step, 
         step=2,
         trajectory_key=rekey,
+        bidirectional=False,
         parallel_workers=2,
         name='track_person')(redetect_person)
 
+    short_person_trajectories = Sort(2*detect_step)(short_person_trajectories)
+
     long_person_trajectories = Coalesce(
-        predicate=traj_concatable(detect_step*2, 0.1, rekey),
+        predicate=traj_concatable(detect_step, 0.1, rekey),
         bounds_merge_op=Bounds3D.span,
         payload_merge_op=traj_concat_payload(rekey),
         distance=lambda i1, i2: _iou(i1.payload[rekey][-1], i2),
         epsilon=3*detect_step
     )(short_person_trajectories)
 
+    # TODO filter for duration
+
     def merge_op_getout(ic, ip):
         new_bounds = ic.bounds.span(ip)
-        new_bounds['t1'] = max(0, ip['t1'] - fps)
-        new_bounds['t2'] = min(frame_count, ip['t1'] + 10*fps)
+        new_bounds['t1'] = max(0, ip['t1'] - 7*fps) # wind back 3 seconds
+        new_bounds['t2'] = min(frame_count, ip['t1'] + 3*fps)
         new_payload = {rekey: ip.payload[rekey]}
         return Interval(new_bounds, new_payload)
 
     get_out = JoinWithTimeWindow(
-        lambda ic, ip: ic['t1'] < ip['t1'] < ic['t2'] and _iou(ic, ip.payload[rekey][0]) > 0.05,
+        lambda ic, ip: ic['t1'] < ip['t1'] < ic['t2'] and _iou(ic, ip.payload[rekey][0]) > 0.01,
         merge_op=merge_op_getout
     )(FromIterable(buffered_stopped_cars)(), long_person_trajectories)
 
@@ -220,6 +224,7 @@ if __name__ == "__main__":
                     'x2': b['x2'],
                     'y1': b['y1'],
                     'y2': b['y2'],
+                    'result_size': len(mp4),
                     'frame_count': metadata['frame_count'],
                     'fps': metadata['fps'],
                     'width': metadata['width'],

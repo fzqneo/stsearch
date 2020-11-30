@@ -18,11 +18,14 @@ from stsearch.third_party.sorttrack.sort import Sort as SORTTrack
 from stsearch.videolib import AbstractVideoDecoder, VideoFrameInterval
 
 
-def _cv2_track_from_box(decoder, window, step, trajectory_key) -> typing.Callable[[Interval,], Interval]:
+def _cv2_track_from_box(decoder, window, step, trajectory_key, backward=False, bidirectional=False) -> typing.Callable[[Interval,], Interval]:
+    assert step > 0
+    assert not (backward and bidirectional)
 
-    def new_fn(i1: Interval) -> Interval:
-        tracker = cv2.TrackerCSRT_create() # best accuracy but slow
-        # tracker = cv2.TrackerKCF_create()
+    # Either forward or backward, the current t1 is included in the output trajectory
+
+    def new_fn_forward(i1: Interval) -> Interval:
+        tracker = cv2.TrackerCSRT_create() 
         ret_bounds = i1.bounds
         ret_payload = {trajectory_key: [VideoFrameInterval(i1.bounds, root_decoder=decoder), ]}
 
@@ -45,7 +48,7 @@ def _cv2_track_from_box(decoder, window, step, trajectory_key) -> typing.Callabl
                 x, y, w, h = next_box # pixel coord
                 x1, y1, x2, y2 = x, y, x+w, y+h
                 x1, y1, x2, y2 = x1/W, y1/H, x2/W, y2/H # relative coord
-                next_bounds = Bounds3D(ts, ts, x1, x2, y1, y2)
+                next_bounds = Bounds3D(ts, ts+1, x1, x2, y1, y2)
                 ret_bounds = ret_bounds.span(next_bounds)
                 ret_payload[trajectory_key].append(
                     VideoFrameInterval(next_bounds, root_decoder=decoder)
@@ -55,11 +58,65 @@ def _cv2_track_from_box(decoder, window, step, trajectory_key) -> typing.Callabl
         
         return Interval(ret_bounds, ret_payload)
 
-    return new_fn
+    def new_fn_backward(i1: Interval) -> Interval:
+        tracker = cv2.TrackerCSRT_create()
+        ret_bounds = i1.bounds
+        ret_payload = {trajectory_key: [VideoFrameInterval(i1.bounds, root_decoder=decoder), ]}
+
+        # buffer all frames in window at once
+        ts_range = list(range(i1['t1'], max(-1, i1['t1']-window), -step))    # reverse order
+        start_fid = min(ts_range)  # inclusive
+        end_fid = max(ts_range) + 1  # exclusive
+        frames_to_track = decoder.get_frame_interval(start_fid, end_fid, step)[::-1]    # reverse tracking order
+
+        # init tracker. For tracking, we must get whole frames
+        H, W = frames_to_track[0].shape[:2]
+        # tracking box in cv2 is the form (x, y, w, h)
+        init_box = np.array([i1['x1']*W, i1['y1']*H, _width(i1)*W, _height(i1)*H]).astype(np.int32)
+        tracker.init(frames_to_track[0], tuple(init_box))
+
+        # iterate remaining frames and update tracker, get tracked result
+        for ts, next_frame in zip(ts_range[1:], frames_to_track[1:]):
+            # tracking backward
+            (success, next_box) = tracker.update(next_frame)
+
+            if success:
+                x, y, w, h = next_box # pixel coord
+                x1, y1, x2, y2 = x, y, x+w, y+h
+                x1, y1, x2, y2 = x1/W, y1/H, x2/W, y2/H # relative coord
+                next_bounds = Bounds3D(ts, ts+1, x1, x2, y1, y2)
+                ret_bounds = ret_bounds.span(next_bounds)
+                ret_payload[trajectory_key].insert(
+                    0,
+                    VideoFrameInterval(next_bounds, root_decoder=decoder)
+                )
+            else:
+                break
+        
+        return Interval(ret_bounds, ret_payload)
+
+    def new_fn_bidirectional(i1: Interval) -> Interval:
+        i_backward = new_fn_backward(i1)
+        i_forward = new_fn_forward(i1)
+        ret_bounds = i_backward.bounds.span(i_forward.bounds)
+        ret_payload = {
+            trajectory_key: i_backward.payload[trajectory_key][:-1] + i_forward.payload[trajectory_key]
+        }
+        return Interval(ret_bounds, ret_payload)
+    
+    if bidirectional:
+        logger.debug("tracking bidirectional")
+        return new_fn_bidirectional
+    elif backward:
+        logger.debug("tracking backward")
+        return new_fn_backward
+    else:
+        logger.debug("tracking forward")
+        return new_fn_forward
 
 class TrackFromBox(Graph):
 
-    def __init__(self, decoder, window, step=1, trajectory_key='trajectory', name=None, parallel_workers=1):
+    def __init__(self, decoder, window, step=1, trajectory_key='trajectory', backward=False, bidirectional=False, name=None, parallel_workers=1):
         super().__init__()
         assert isinstance(decoder, AbstractVideoDecoder)
         self.decoder = decoder
@@ -68,16 +125,18 @@ class TrackFromBox(Graph):
         self.trajectory_key = trajectory_key
         self.name = name
         self.parallel_workers = parallel_workers
+        self.backward = backward
+        self.bidirectional = bidirectional
 
     def call(self, instream):
         if self.parallel_workers == 1:
             return Map(
-                map_fn=_cv2_track_from_box(self.decoder, self.window, self.step, self.trajectory_key),
+                map_fn=_cv2_track_from_box(self.decoder, self.window, self.step, self.trajectory_key, self.backward, self.bidirectional),
                 name=f"{self.__class__.__name__}:{self.name}"
             )(instream)
         else:
             return ParallelMap(
-                map_fn=_cv2_track_from_box(self.decoder, self.window, self.step, self.trajectory_key),
+                map_fn=_cv2_track_from_box(self.decoder, self.window, self.step, self.trajectory_key, self.backward, self.bidirectional),
                 name=f"{self.__class__.__name__}:{self.name}",
                 max_workers=self.parallel_workers
             )(instream)

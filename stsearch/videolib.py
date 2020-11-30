@@ -308,7 +308,7 @@ class LRULocalVideoDecoder(LocalVideoDecoder):
                 return frame
 
     def get_frame_interval(self, start_frame_id, end_frame_id, step=1):
-        logger.debug(f"{self.__class__.__name__} get_frame_interval {start_frame_id} {end_frame_id} {step}")
+        # logger.debug(f"{self.__class__.__name__} get_frame_interval {start_frame_id} {end_frame_id} {step}")
         with self.lock:
             try:
                 rv = [self.cache[i] for i in range(start_frame_id, end_frame_id, step)]
@@ -372,7 +372,7 @@ class VideoCropFrameGroup(Graph):
             X1, X2 = max(X1, 0), min(X2, W)
             Y1, Y2 = max(Y1, 0), min(Y2, H)
 
-            logger.debug(f"3D cropping: {intrvl['t1'], intrvl['t2'], X1, X2, Y1, Y2}")
+            # logger.debug(f"3D cropping: {intrvl['t1'], intrvl['t2'], X1, X2, Y1, Y2}")
             # perform spatial crop
             fg.frames =  [ frame[Y1:Y2, X1:X2, :] for frame in full_frames ]
             return fg
