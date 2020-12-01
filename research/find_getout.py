@@ -30,7 +30,19 @@ logger.setLevel(logging.DEBUG)
 INPUT_NAME = "VIRAT_getin.mp4"
 OUTPUT_DIR = Path(__file__).stem + "_output"
 
-DETECTION_SERVERS = ['cloudlet031.elijah.cs.cmu.edu:5000', 'cloudlet031.elijah.cs.cmu.edu:5001']
+DIAMOND_SERVERS = [
+    'agra.diamond.cs.cmu.edu',
+    'briolette.diamond.cs.cmu.edu',
+    'cullinan.diamond.cs.cmu.edu',
+    'dresden.diamond.cs.cmu.edu',
+    'indore.diamond.cs.cmu.edu',
+    'kimberly.diamond.cs.cmu.edu',
+    'patiala.diamond.cs.cmu.edu',
+    'transvaal.diamond.cs.cmu.edu'
+    ]
+DETECTION_SERVERS = [f"{h}:{p}" for h,p in itertools.product(DIAMOND_SERVERS, [5000, 5001])]
+
+# DETECTION_SERVERS = ['cloudlet031.elijah.cs.cmu.edu:5000', 'cloudlet031.elijah.cs.cmu.edu:5001']
 
 SAVE_VIDEO=True
 
@@ -61,8 +73,9 @@ def traj_concatable(epsilon, iou_thres, key='trajectory'):
         logger.debug(f"Checking two trajs: {i1.bounds}, {i2.bounds}")
         logger.debug(f"i1: from {i1.payload[key][0].bounds} to {i1.payload[key][-1].bounds}")
         logger.debug(f"i2: from {i2.payload[key][0].bounds} to {i2.payload[key][-1].bounds}")
+        # TODO consider when trajs partially overlap
         rv = i1['t1'] < i2['t1'] \
-            and meets_before(epsilon)(i1, i2) \
+            and abs(i1['t2'] - i2['t1']) < epsilon \
             and iou_at_least(iou_thres)(i1.payload[key][-1], i2.payload[key][0])
         logger.debug(f"result: {rv}")
         return rv
@@ -70,6 +83,7 @@ def traj_concatable(epsilon, iou_thres, key='trajectory'):
     return new_pred
 
 def traj_concat_payload(key):
+    # TODO consider when trajs partially overlap
 
     def new_payload_op(p1: dict, p2: dict) -> dict:
         logger.debug(f"Merging two trajectories of lengths {len(p1[key])} and {len(p2[key])}")
@@ -97,8 +111,8 @@ def query(path, session):
     detect_step = int(fps)
     
     all_frames = VideoToFrames(LocalVideoDecoder(path))()
-    sampled_frames = Slice(end=5*60*30, step=detect_step)(all_frames)
-    detections = Detection(server_list=DETECTION_SERVERS, parallel=2)(sampled_frames)
+    sampled_frames = Slice(step=detect_step)(all_frames)
+    detections = Detection(server_list=DETECTION_SERVERS, parallel=16)(sampled_frames)
 
     crop_cars = DetectionFilterFlatten(['car'], 0.5)(detections)
     stopped_cars = Coalesce(
@@ -161,7 +175,7 @@ def query(path, session):
     redetect_patches = Log("redetect_patches")(redetect_patches)
 
     # we already sample when generating `redetect_bounds`. Don't sample again here.
-    redetect_detection = Detection(server_list=DETECTION_SERVERS, parallel=2)(redetect_patches) 
+    redetect_detection = Detection(server_list=DETECTION_SERVERS, parallel=16)(redetect_patches) 
     redetect_person = DetectionFilterFlatten(['person'], 0.1)(redetect_detection)
 
     redetect_person = Log("redetect_person")(redetect_person)
@@ -173,11 +187,12 @@ def query(path, session):
         window=detect_step, 
         step=2,
         trajectory_key=rekey,
+        bidirectional=True,
         parallel_workers=2,
         name='track_person')(redetect_person)
 
     long_person_trajectories = Coalesce(
-        predicate=traj_concatable(detect_step*2, 0.01, rekey),
+        predicate=traj_concatable(2*detect_step, 0.1, rekey),
         bounds_merge_op=Bounds3D.span,
         payload_merge_op=traj_concat_payload(rekey),
         # distance=lambda i1, i2: _iou(i1.payload[rekey][-1], i2.payload[rekey][0]),
@@ -191,12 +206,12 @@ def query(path, session):
         new_payload = {rekey: ip.payload[rekey]}
         return Interval(new_bounds, new_payload)
 
-    # get_out = JoinWithTimeWindow(
-    #     lambda ic, ip: ic['t1'] < ip['t1'] < ic['t2'] and _iou(ic, ip.payload[rekey][0]) > 0.01,
-    #     merge_op=merge_op_getout
-    # )(FromIterable(buffered_stopped_cars)(), long_person_trajectories)
+    get_out = JoinWithTimeWindow(
+        lambda ic, ip: ic['t1'] < ip['t1'] < ic['t2'] and _iou(ic, ip.payload[rekey][0]) > 0.05,
+        merge_op=merge_op_getout
+    )(FromIterable(buffered_stopped_cars)(), long_person_trajectories)
 
-    get_out = long_person_trajectories
+    # get_out = long_person_trajectories
 
     vis_decoder = LRULocalVideoDecoder(path, cache_size=900)
     raw_fg = VideoCropFrameGroup(vis_decoder, copy_payload=True)(get_out)
