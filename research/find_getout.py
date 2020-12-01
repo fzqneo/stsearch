@@ -12,7 +12,10 @@ from numpy.linalg import norm
 
 from rekall.bounds import Bounds3D
 from rekall.bounds.utils import bounds_intersect, bounds_span
-from rekall.predicates import _area, _height, _iou, _width, length_at_least, meets_before, iou_at_least, overlaps_before
+from rekall.predicates import (
+    _area, _height, _iou, _width, length_at_least, meets_before, iou_at_least, overlaps_before,
+    starts
+)
 
 from stsearch.cvlib import *
 from stsearch.interval import *
@@ -62,33 +65,29 @@ class Log(Graph):
 def traj_concatable(epsilon, iou_thres, key='trajectory'):
     """Returns a predicate function that tests whether two trajectories
     are "closed" enough so that they can be concatenated.
-
-    Args:
-        epsilon ([type]): [description]
-        iou_thres ([type]): [description]
-        key (str, optional): [description]. Defaults to 'trajectory'.
     """
 
     def new_pred(i1: Interval, i2: Interval) -> bool:
         logger.debug(f"Checking two trajs: {i1.bounds}, {i2.bounds}")
         logger.debug(f"i1: from {i1.payload[key][0].bounds} to {i1.payload[key][-1].bounds}")
         logger.debug(f"i2: from {i2.payload[key][0].bounds} to {i2.payload[key][-1].bounds}")
-        # TODO consider when trajs partially overlap
-        rv = i1['t1'] < i2['t1'] \
-            and abs(i1['t2'] - i2['t1']) < epsilon \
-            and iou_at_least(iou_thres)(i1.payload[key][-1], i2.payload[key][0])
-        logger.debug(f"result: {rv}")
-        return rv
+
+        if not (i1['t1'] < i2['t1'] and i1['t2'] < i2['t2'] and abs(i1['t2']-i2['t1']) < epsilon):
+            return False
+
+        tr1 = i1.payload[key]
+        tr2 = [j for j in i2.payload[key] if j['t1'] >= tr1[-1]['t1']]   # clamp the overlapping part
+        return _iou(tr1[-1], tr2[0]) > iou_thres
 
     return new_pred
 
 def traj_concat_payload(key):
-    # TODO consider when trajs partially overlap
 
     def new_payload_op(p1: dict, p2: dict) -> dict:
         logger.debug(f"Merging two trajectories of lengths {len(p1[key])} and {len(p2[key])}")
-        return {key: p1[key] + p2[key]}
-
+        tr1 = p1[key]
+        tr2 = [j for j in p2[key] if j['t1'] > tr1[-1]['t1']]   # clamp the overlapping part
+        return {key: tr1+tr2}
     return new_payload_op
 
 
@@ -192,11 +191,11 @@ def query(path, session):
         name='track_person')(redetect_person)
 
     long_person_trajectories = Coalesce(
-        predicate=traj_concatable(2*detect_step, 0.1, rekey),
+        predicate=traj_concatable(3*detect_step, 0.01, rekey),
         bounds_merge_op=Bounds3D.span,
         payload_merge_op=traj_concat_payload(rekey),
         # distance=lambda i1, i2: _iou(i1.payload[rekey][-1], i2.payload[rekey][0]),
-        epsilon=3*detect_step
+        epsilon=10*detect_step
     )(short_person_trajectories)
 
     def merge_op_getout(ic, ip):
