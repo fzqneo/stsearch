@@ -8,6 +8,7 @@ RUN apt-get update --fix-missing \
         libgl1-mesa-glx \
         libssl-dev \
         python3-dev \
+        unzip \
     && apt-get clean
 
 RUN  conda install -c conda-forge m2crypto \
@@ -28,5 +29,7 @@ RUN  conda install -c conda-forge m2crypto \
 
 COPY . /root/
 WORKDIR /root/
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . \
+    && unzip frcnn_cache.zip \
+    && rm frcnn_cache.zip 
 COPY ["fil_stsearch.py", "/usr/local/share/diamond/filters/"]
