@@ -1,4 +1,8 @@
+import hashlib
 import io
+import json
+import operator
+from pathlib import Path
 import random
 import requests
 from typing import Iterable, Optional
@@ -168,3 +172,32 @@ class DetectionFilterFlatten(Graph):
             return rv
 
         return Flatten(flatten_fn, name=self.name)(instream)
+
+
+
+class CachedVIRATDetection(Graph):
+    def __init__(self, path, cache_dir="/root/cache", result_key=DEFAULT_DETECTION_KEY):
+
+        # load cache file and sort by t1, so that we can direct access by indexing
+        h = hashlib.md5()
+        with open(path, 'rb') as f:
+            h.update(f.read())
+        digest = str(h.hexdigest())
+        cache_path = str(Path(cache_dir) / (digest+'.json'))
+        with open(cache_path, 'rt') as f:
+            C = json.load(f)
+
+        cached_detection = C['detection']    # list of dict
+        cached_detection = sorted(cached_detection, key=operator.itemgetter('t1')) 
+        self.C = cached_detection
+
+        self.result_key = result_key
+
+    def call(self, instream):
+
+        def map_fn(intrvl):
+            t1 = int(intrvl['t1'])
+            intrvl.payload[self.result_key] = self.C[t1]['detection']
+            return intrvl
+
+        return Map(map_fn)(instream)
