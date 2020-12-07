@@ -1,6 +1,9 @@
 import gc
+import hashlib
 import logging
 import itertools
+import json
+import operator
 import os
 from pathlib import Path
 from typing import List
@@ -12,42 +15,65 @@ from numpy.linalg import norm
 
 from rekall.bounds import Bounds3D
 from rekall.bounds.utils import bounds_intersect, bounds_span
-from rekall.predicates import _area, _height, _iou, _width, meets_before, iou_at_least, overlaps_before
+from rekall.predicates import (
+    _area, _height, _iou, _width, and_pred, length_at_least, meets_before, iou_at_least, 
+    or_pred, overlaps_before, starts
+)
 
 from stsearch.cvlib import *
 from stsearch.interval import *
 from stsearch.op import *
-from stsearch.stdlib import centroid, same_time
-from stsearch.utils import run_to_finish
+from stsearch.stdlib import centroid, same_time, average_space_span_time, tiou, tiou_at_least
+from stsearch.utils import run_to_finish, VisualizeTrajectoryOnFrameGroup
 from stsearch.videolib import *
+
 
 logger.setLevel(logging.INFO)
 
-DETECTION_SERVERS = ["172.17.0.1:5000", "172.17.0.1:5001"]
+DIAMOND_SERVERS = [
+    'agra.diamond.cs.cmu.edu',
+    'briolette.diamond.cs.cmu.edu',
+    'cullinan.diamond.cs.cmu.edu',
+    'dresden.diamond.cs.cmu.edu',
+    'indore.diamond.cs.cmu.edu',
+    'kimberly.diamond.cs.cmu.edu',
+    'patiala.diamond.cs.cmu.edu',
+    'transvaal.diamond.cs.cmu.edu'
+    ]
+DETECTION_SERVERS = [f"{h}:{p}" for h,p in itertools.product(DIAMOND_SERVERS, [5000, 5001])]
 
+# DETECTION_SERVERS = ["172.17.0.1:5000", "172.17.0.1:5001"]
+
+        
 def traj_concatable(epsilon, iou_thres, key='trajectory'):
     """Returns a predicate function that tests whether two trajectories
     are "closed" enough so that they can be concatenated.
-
-    Args:
-        epsilon ([type]): [description]
-        iou_thres ([type]): [description]
-        key (str, optional): [description]. Defaults to 'trajectory'.
     """
 
     def new_pred(i1: Interval, i2: Interval) -> bool:
-        return i1['t1'] < i2['t1'] \
-            and abs(i1['t2'] - i2['t1']) < epsilon \
-            and iou_at_least(iou_thres)(i1.payload[key][-1], i2.payload[key][0])
+        logger.debug(f"checking two traj: {(i1['t1'], i1['t2'])}, {(i2['t1'], i2['t2'])}")
+        if not (i1['t1'] < i2['t1'] and i1['t2'] < i2['t2'] and abs(i1['t2']-i2['t1']) <= epsilon):
+            logger.debug("failed temporal condition")
+            return False
+
+        tr1 = i1.payload[key]
+        tr2 = [j for j in i2.payload[key] if j['t1'] >= tr1[-1]['t1']]   # clamp the overlapping part
+        N = 3
+        ret = _iou(average_space_span_time(tr1[-N:]), average_space_span_time(tr2[:N])) > iou_thres
+        if not ret:
+            logger.debug("failed spatial conditoin")
+            logger.debug("i1.traj="+'\n'.join([str(i.bounds) for i in i1.payload[key]]))
+            logger.debug("i2.traj="+'\n'.join([str(i.bounds) for i in i2.payload[key]]))
+        return ret
 
     return new_pred
 
 def traj_concat_payload(key):
 
     def new_payload_op(p1: dict, p2: dict) -> dict:
-        logger.debug(f"Merging two trajectories of lengths {len(p1[key])} and {len(p2[key])}")
-        return {key: p1[key] + p2[key]}
-
+        tr1 = p1[key]
+        tr2 = [j for j in p2[key] if j['t1'] > tr1[-1]['t1']]   # clamp the overlapping part
+        return {key: tr1+tr2}
     return new_payload_op
 
 
@@ -71,9 +97,11 @@ def query(path, session):
     
     all_frames = VideoToFrames(LocalVideoDecoder(path))()
     sampled_frames = Slice(step=detect_step)(all_frames)
-    detections = Detection(server_list=DETECTION_SERVERS, parallel=2)(sampled_frames)
 
-    crop_cars = DetectionFilterFlatten(['car'], 0.5)(detections)
+    # detections = Detection(server_list=DETECTION_SERVERS, parallel=2)(sampled_frames)
+    detections = CachedVIRATDetection(path)(sampled_frames)
+
+    crop_cars = DetectionFilterFlatten(['car', 'truck', 'bus'], 0.3)(detections)
     stopped_cars = Coalesce(
         predicate=iou_at_least(0.7),
         bounds_merge_op=Bounds3D.span,
@@ -131,8 +159,8 @@ def query(path, session):
         flatten_fn=lambda fg: fg.to_image_intervals()
     )(redetect_fg)
     # Don't sample again here
-    redetect_detection = Detection(server_list=DETECTION_SERVERS, parallel=2)(redetect_patches)
-    redetect_person = DetectionFilterFlatten(['person'], 0.1)(redetect_detection)
+    redetect_detection = Detection(server_list=DETECTION_SERVERS, parallel=8)(redetect_patches)
+    redetect_person = DetectionFilterFlatten(['person'], 0.3)(redetect_detection)
 
     rekey = 'traj_person'
 
@@ -141,21 +169,21 @@ def query(path, session):
         window=detect_step, 
         step=2,
         trajectory_key=rekey,
-        bidirectional=False,
+        bidirectional=True,
         parallel_workers=2,
         name='track_person')(redetect_person)
 
     short_person_trajectories = Sort(2*detect_step)(short_person_trajectories)
 
     long_person_trajectories = Coalesce(
-        predicate=traj_concatable(detect_step, 0.1, rekey),
+        predicate=traj_concatable(3*detect_step, 0.1, rekey),
         bounds_merge_op=Bounds3D.span,
         payload_merge_op=traj_concat_payload(rekey),
-        distance=lambda i1, i2: _iou(i1.payload[rekey][-1], i2),
-        epsilon=3*detect_step
+        epsilon=10*detect_step
     )(short_person_trajectories)
 
-    # TODO filter for duration
+    long_person_trajectories = Filter(
+        lambda i: i.bounds.length()>3*fps)(long_person_trajectories)
 
     def merge_op_getout(ic, ip):
         new_bounds = ic.bounds.span(ip)
@@ -165,14 +193,22 @@ def query(path, session):
         return Interval(new_bounds, new_payload)
 
     get_out = JoinWithTimeWindow(
-        lambda ic, ip: ic['t1'] < ip['t1'] < ic['t2'] and _iou(ic, ip.payload[rekey][0]) > 0.01,
-        merge_op=merge_op_getout
+        lambda ic, ip: ic['t1'] < ip['t1'] < ic['t2'] and _iou(ic, ip.payload[rekey][0]) > 0.05,
+        merge_op=merge_op_getout,
+        window=5*60*fps
     )(FromIterable(buffered_stopped_cars)(), long_person_trajectories)
 
+    # dedup final results
+    get_out = Coalesce(
+        predicate=and_pred(iou_at_least(0.5), or_pred(during_inv(), tiou_at_least(0.5))),
+        payload_merge_op=lambda p1,p2: p1
+    )(get_out)
 
     vis_decoder = LRULocalVideoDecoder(path, cache_size=900)
     raw_fg = VideoCropFrameGroup(vis_decoder, copy_payload=True)(get_out)
-    output = raw_fg
+    visualize_fg = VisualizeTrajectoryOnFrameGroup(rekey, name="visualize-person-traj")(raw_fg)
+
+    output = visualize_fg
 
     output_sub = output.subscribe()
     output.start_thread_recursive()
@@ -213,6 +249,7 @@ if __name__ == "__main__":
         metadata = query_result['metadata']
         print(f"{clip_id}, {filter_result.stats}, {metadata}. stopped car={query_result['stopped_cars']}. #={len(query_result['results'])}")
         for b, mp4 in query_result['results']:
+            # FIXME there can be duplicated names and files get overwritten
             open(f"getoutcar_{clip_id}_{b['t1']}_{b['t2']}.mp4", 'wb').write(mp4)
 
             save_results.append(

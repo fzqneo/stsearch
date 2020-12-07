@@ -27,9 +27,12 @@ RUN  conda install -c conda-forge m2crypto \
         simplejson \
     && conda clean --all -y
 
-COPY . /root/
 WORKDIR /root/
-RUN pip install --no-cache-dir . \
+RUN wget https://github.com/fzqneo/stsearch/releases/download/20201204/frcnn_cache.zip \
     && unzip frcnn_cache.zip \
     && rm frcnn_cache.zip 
+
+COPY . /root/
+RUN pip install --no-cache-dir . 
+
 COPY ["fil_stsearch.py", "/usr/local/share/diamond/filters/"]
