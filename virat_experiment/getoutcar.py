@@ -187,8 +187,8 @@ def query(path, session):
 
     def merge_op_getout(ic, ip):
         new_bounds = ic.bounds.span(ip)
-        new_bounds['t1'] = max(0, ip['t1'] - 7*fps) # wind back 3 seconds
-        new_bounds['t2'] = min(frame_count, ip['t1'] + 3*fps)
+        new_bounds['t1'] = max(0, ip['t1'] - 3*fps) # wind back 3 seconds
+        new_bounds['t2'] = ip['t1']
         new_payload = {rekey: ip.payload[rekey]}
         return Interval(new_bounds, new_payload)
 
@@ -198,11 +198,8 @@ def query(path, session):
         window=5*60*fps
     )(FromIterable(buffered_stopped_cars)(), long_person_trajectories)
 
-    # dedup final results
-    get_out = Coalesce(
-        predicate=and_pred(iou_at_least(0.5), or_pred(during_inv(), tiou_at_least(0.5))),
-        payload_merge_op=lambda p1,p2: p1
-    )(get_out)
+    # dedup and merge final results
+    get_out = Coalesce(predicate=overlaps())(get_out)
 
     vis_decoder = LRULocalVideoDecoder(path, cache_size=900)
     raw_fg = VideoCropFrameGroup(vis_decoder, copy_payload=True)(get_out)
