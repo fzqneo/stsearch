@@ -74,7 +74,7 @@ class ImageInterval(Interval):
     @property
     def jpeg(self):
         if JPEG_KEY not in self.payload:
-            _, jpg_arr = cv2.imencode('.jpg', cv2.cvtColor(self.rgb, cv2.COLOR_RGB2BGR))
+            _, jpg_arr = cv2.imencode('.jpg', cv2.cvtColor(self.rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 100])
             self.payload[JPEG_KEY] = jpg_arr.tobytes()
 
         return self.payload[JPEG_KEY]
@@ -87,6 +87,12 @@ class ImageInterval(Interval):
 
     def savefile(self, path):
         cv2.imwrite(path, cv2.cvtColor(self.rgb, cv2.COLOR_RGB2BGR))
+
+    def savejpeg(self, path):
+        cv2.imwrite(path, cv2.cvtColor(self.rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 100])
+
+    def savepng(self, path):
+        cv2.imwrite(path, cv2.cvtColor(self.rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_PNG_COMPRESSION, 0])
 
     def copy(self):
         return ImageInterval(

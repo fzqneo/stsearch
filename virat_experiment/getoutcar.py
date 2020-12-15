@@ -129,6 +129,7 @@ def query(path, session):
     # Stage 2: reprocess buffered stopped cars
     gc.collect()
     stopped_cars_1 = FromIterable(buffered_stopped_cars)()
+    
     def dilate_car(icar: Interval) -> Interval:
         carh, carw = _height(icar), _width(icar)
         new_bounds = Bounds3D(

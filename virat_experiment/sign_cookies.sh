@@ -15,6 +15,6 @@ SERVERS=($(cat $(dirname $0)/SERVER_LIST))
 # echo $SERVERS
 
 for i in ${!SERVERS[@]}; do 
-    cookiecutter -e 99999999 -s ${SERVERS[$i]} -u http://localhost:5873/proxy/$(($i+1))of${#SERVERS[@]}/localhost:5873/collection/VIRAT
+    cookiecutter -e 99999999 -s ${SERVERS[$i]} -u http://localhost:5873/proxy/$(($i+1))of${#SERVERS[@]}/localhost:5873/collection/VIRAT12
 done;
 #  http://localhost:5873/proxy/2of8/localhost:5873/collection/VIRAT

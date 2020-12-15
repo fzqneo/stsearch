@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+import fire
 import pandas as pd
 
 VIRAT_ROOT = "/home/zf/VIRAT/VIRAT/Public Dataset/VIRAT Video Dataset Release 2.0/VIRAT Ground Dataset/"
@@ -38,7 +39,52 @@ def load_summary():
     return df
 
 
+def parse_event_list(clip_id, event_type) -> pd.DataFrame:
+    try:
+        df = load_events(clip_id)
+    except FileNotFoundError:
+        # some clips have no events and no event file
+        return pd.DataFrame()
+    
+    df = df[df['event_type']==event_type]
+    df['x2'] = df['x1'] + df['w']
+    df['y2'] = df['y1'] + df['h']
+    df['t1'], df['t2'] = df['start_frame'], df['end_frame']
+    
+    rv = []
+    for event_id in df['event_id'].unique():
+        edf = df[df['event_id']==event_id]
+        rv.append({
+            'event_id': event_id,
+            'x1': edf['x1'].min(),
+            'x2': edf['x2'].max(),
+            'y1': edf['y1'].min(),
+            'y2': edf['y2'].max(),
+            't1': edf['t1'].min(),
+            't2': edf['t2'].max(),
+        })
+        
+    return  pd.DataFrame(rv)
+
+def parse_all_event_list(event_type) -> pd.DataFrame:
+    all_df = []
+    for clip_id in LIST_CLIP_ID:
+        df = parse_event_list(clip_id, event_type)
+        if not df.empty:
+            df['clip_id'] = clip_id
+            all_df.append(df)
+        
+    return pd.concat(all_df, ignore_index=True)
+
+
+def parse_result(result_file="getoutcar.csv"):
+    df = pd.read_csv(result_file, index_col=0)
+    # convert relative coord to pixel coord
+    df['x1'] = df['x1'] * df['width']
+    df['x2'] = df['x2'] * df['width']
+    df['y1'] = df['y1'] * df['height']
+    df['y2'] = df['y2'] * df['height']
+    return df
+
 if __name__ == "__main__":
-    # df = load_events("VIRAT_S_010203_02_000347_000397")
-    df = load_summary()
-    print(df)
+    fire.Fire()    
