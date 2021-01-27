@@ -5,7 +5,6 @@ import typing
 from opendiamond.client.search import Blob, DiamondSearch, FilterSpec
 from opendiamond.client.util import get_default_scopecookies
 
-
 OUTPUT_ATTR = 'stsearch-output'
 
 def start_stsearch_by_script(scrit_content: bytes) -> typing.Iterator:

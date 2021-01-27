@@ -14,6 +14,7 @@ RUN apt-get update --fix-missing \
 RUN  conda install -c conda-forge m2crypto \
     && pip install  --no-cache-dir \
         filterpy==1.4.5 \
+        fire \
         logzero \
         mmh3 \
         opencv-contrib-python>=4.2.0.0 \

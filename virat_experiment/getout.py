@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List
 
 import cv2
+import fire
 from logzero import logger
 import numpy as np
 from numpy.linalg import norm
@@ -27,7 +28,6 @@ from stsearch.stdlib import centroid, same_time, average_space_span_time, tiou, 
 from stsearch.utils import run_to_finish, VisualizeTrajectoryOnFrameGroup
 from stsearch.videolib import *
 
-
 logger.setLevel(logging.INFO)
 
 DIAMOND_SERVERS = [
@@ -42,8 +42,8 @@ DIAMOND_SERVERS = [
     ]
 DETECTION_SERVERS = [f"{h}:{p}" for h,p in itertools.product(DIAMOND_SERVERS, [5000, 5001])]
 
-# DETECTION_SERVERS = ["172.17.0.1:5000", "172.17.0.1:5001"]
-
+GET_MP4 = True
+VIRAT_CACHE_DIR = "/root/cache/"
         
 def traj_concatable(epsilon, iou_thres, key='trajectory'):
     """Returns a predicate function that tests whether two trajectories
@@ -99,7 +99,7 @@ def query(path, session):
     sampled_frames = Slice(step=detect_step)(all_frames)
 
     # detections = Detection(server_list=DETECTION_SERVERS, parallel=2)(sampled_frames)
-    detections = CachedVIRATDetection(path)(sampled_frames)
+    detections = CachedVIRATDetection(path, cache_dir=VIRAT_CACHE_DIR)(sampled_frames)
 
     crop_cars = DetectionFilterFlatten(['car', 'truck', 'bus'], 0.3)(detections)
     stopped_cars = Coalesce(
@@ -160,7 +160,7 @@ def query(path, session):
         flatten_fn=lambda fg: fg.to_image_intervals()
     )(redetect_fg)
     # Don't sample again here
-    redetect_detection = Detection(server_list=DETECTION_SERVERS, parallel=8)(redetect_patches)
+    redetect_detection = Detection(server_list=DETECTION_SERVERS, parallel=len(DETECTION_SERVERS))(redetect_patches)
     redetect_person = DetectionFilterFlatten(['person'], 0.3)(redetect_detection)
 
     rekey = 'traj_person'
@@ -212,61 +212,92 @@ def query(path, session):
     output.start_thread_recursive()
 
     for _, intrvl in enumerate(output_sub):
-        # query_result['results'].append((intrvl.bounds, b''))
-        query_result['results'].append((intrvl.bounds.copy(), intrvl.get_mp4()))
+        if GET_MP4:
+            query_result['results'].append((intrvl.bounds.copy(), intrvl.get_mp4()))
+        else:
+            query_result['results'].append((intrvl.bounds, b''))
+
         del intrvl
         gc.collect()
 
     return query_result
 
 
+def main(mode, path=None, result_file="getout_result.csv", get_mp4=True, mp4_dir="getout_mp4"):
+    assert mode in ('remote', 'local')
+
+    if mode == 'remote':
+        from pathlib import Path
+        import pickle
+        import time
+
+        import pandas as pd 
+        from stsearch.diamond_wrap.result_pb2 import STSearchResult
+        from stsearch.diamond_wrap.utils import start_stsearch_by_script, OUTPUT_ATTR
+
+        tic = time.time()
+
+        results = start_stsearch_by_script(open(__file__, 'rb').read())
+
+        save_results= []
+
+        for i, res in enumerate(results):
+            # each `res` corresponds to results of a clip_id
+            print(f"=> Result {i}. Time {(time.time()-tic)/60:.1f} min.")
+            object_id = res['_ObjectID'].decode()
+            clip_id = Path(object_id).stem
+
+            filter_result: STSearchResult = STSearchResult()
+            filter_result.ParseFromString(res[OUTPUT_ATTR])
+            query_result = pickle.loads(filter_result.query_result)
+
+            for seq, (b, mp4) in enumerate(query_result['results']):
+                if len(mp4) > 0:
+                    with open(f"{mp4_dir}/{clip_id}_{seq}_{b['t1']}_{b['t2']}.mp4", 'wb') as f:
+                        f.write(mp4)
+                        logger.info(f"saved {f.name}")
+
+                save_results.append(
+                    {
+                        'clip_id': clip_id,
+                        't1': b['t1'],
+                        't2': b['t2'],
+                        'x1': b['x1'],
+                        'x2': b['x2'],
+                        'y1': b['y1'],
+                        'y2': b['y2'],
+                        'result_size': len(mp4),
+                        'frame_count': metadata['frame_count'],
+                        'fps': metadata['fps'],
+                        'width': metadata['width'],
+                        'height': metadata['height'],
+                    }
+                )
+
+            del query_result['results']
+            logger.info(query_result)
+            logger.info(f"# results = {seq}")
+
+            pd.DataFrame(save_results).to_csv(result_file)
+
+    elif mode == 'local':
+        from pathlib import Path
+
+        assert path is not None
+        global VIRAT_CACHE_DIR
+        VIRAT_CACHE_DIR = "/home/zf/video-analytics/stsearch/virat_experiment/cache"
+        query_result = query(path, session=None)
+        clip_id = Path(path).stem
+        for seq, (b, mp4) in enumerate(query_result['results']):
+            if len(mp4) > 0:
+                with open(f"{mp4_dir}/{clip_id}_{seq}_{b['t1']}_{b['t2']}.mp4", 'wb') as f:
+                    f.write(mp4)
+                    logger.info(f"saved {f.name}")
+
+        del query_result['results']
+        logger.info(query_result)
+        logger.info(f"# results = {seq}")
+
+
 if __name__ == "__main__":
-    from pathlib import Path
-    import pickle
-    import time
-
-    import pandas as pd 
-    from stsearch.diamond_wrap.result_pb2 import STSearchResult
-    from utils import start_stsearch_by_script, OUTPUT_ATTR
-
-    tic = time.time()
-
-    results = start_stsearch_by_script(open(__file__, 'rb').read())
-
-    save_results= []
-
-    for i, res in enumerate(results):
-        # each `res` corresponds to results of a clip_id
-        print(f"=> Result {i}. Time {(time.time()-tic)/60:.1f} min.")
-        object_id = res['_ObjectID'].decode()
-        clip_id = Path(object_id).stem
-
-        filter_result: STSearchResult = STSearchResult()
-        filter_result.ParseFromString(res[OUTPUT_ATTR])
-        query_result = pickle.loads(filter_result.query_result)
-        metadata = query_result['metadata']
-        print(f"{clip_id}, {filter_result.stats}, {metadata}. stopped car={query_result['stopped_cars']}. #={len(query_result['results'])}")
-        for b, mp4 in query_result['results']:
-            # FIXME there can be duplicated names and files get overwritten
-            open(f"getoutcar_{clip_id}_{b['t1']}_{b['t2']}.mp4", 'wb').write(mp4)
-
-            save_results.append(
-                {
-                    'clip_id': clip_id,
-                    't1': b['t1'],
-                    't2': b['t2'],
-                    'x1': b['x1'],
-                    'x2': b['x2'],
-                    'y1': b['y1'],
-                    'y2': b['y2'],
-                    'result_size': len(mp4),
-                    'frame_count': metadata['frame_count'],
-                    'fps': metadata['fps'],
-                    'width': metadata['width'],
-                    'height': metadata['height'],
-                }
-            )
-
-        # save after getting each clip so that we don't lose all in case of failure
-        pd.DataFrame(save_results).to_csv("getoutcar.csv")
-
+    fire.Fire(main)
