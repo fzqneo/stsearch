@@ -45,11 +45,21 @@ class Detection(Graph):
         def map_fn(intrvl):
             assert isinstance(intrvl, ImageInterval)
 
-            server = random.choice(self.server_list)
-            detect_url = f"http://{server}/detect"
+            max_try = 5
+            while max_try > 0:
+                try:
+                    server = random.choice(self.server_list)
+                    detect_url = f"http://{server}/detect"
+                    r = requests.post(detect_url, files={'image': io.BytesIO(intrvl.jpeg)})
+                    assert r.ok
+                    break
+                except Exception as e:
+                    logger.exception(e)
+                    if max_try > 0:
+                        max_try -= 1
+                    else:
+                        raise
 
-            r = requests.post(detect_url, files={'image': io.BytesIO(intrvl.jpeg)})
-            assert r.ok
             result = r.json()
             if result['success']:
                 intrvl.payload[self.result_key] = result

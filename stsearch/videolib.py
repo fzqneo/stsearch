@@ -183,6 +183,7 @@ class AbstractVideoDecoder(object):
         self.width = None
         self.height = None
         self.resize = resize
+        self.fps = 30
 
     def get_frame(self, frame_id):
         raw_frame = self.get_raw_frame(frame_id)
@@ -213,6 +214,31 @@ class AbstractVideoDecoder(object):
         """
         return [self.get_frame(i) for i in range(start_frame_id, end_frame_id, step)]
 
+
+    def save_direct_crop_from_interval(self, intrvl: Interval, path):
+        fps = self.fps
+        cv2_videowriter_fourcc=cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
+        H = W = X1 = X2 = Y1 = Y2 = None
+        vw = None
+
+        for frame_id in range(int(intrvl['t1']), int(intrvl['t2'])):
+            frame = self.get_frame(frame_id)
+            if H is None:
+                H, W = frame.shape[:2]
+                # convert relative coordinate to absolute
+                X1, X2 = int(intrvl['x1'] * W), int(intrvl['x2'] * W)
+                Y1, Y2 = int(intrvl['y1'] * H), int(intrvl['y2'] * H)
+                # make sure they don't go out of bounds
+                if not 0 <= X1 <= X2 <= W and 0 <= Y1 <= Y2 <= H:
+                    logger.warn(f"You're trying to crop out of bounds {[X1, X2, Y1, Y2]} from {[W, H]}")
+                X1, X2 = max(X1, 0), min(X2, W)
+                Y1, Y2 = max(Y1, 0), min(Y2, H)
+
+            cropped_frame = frame[Y1:Y2, X1:X2, :]
+            if not vw:            
+                vw = cv2.VideoWriter(str(path), cv2_videowriter_fourcc, fps, cropped_frame.shape[:2])
+                vm.write(cv2.cvtColor(cropped_frame, cv2.COLOR_RGB2BGR))
+        vw.release()
 
 class LocalVideoDecoder(AbstractVideoDecoder):
     def __init__(self, path, *args, **kwargs):

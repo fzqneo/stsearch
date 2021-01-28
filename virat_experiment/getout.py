@@ -42,7 +42,7 @@ DIAMOND_SERVERS = [
     ]
 DETECTION_SERVERS = [f"{h}:{p}" for h,p in itertools.product(DIAMOND_SERVERS, [5000, 5001])]
 
-GET_MP4 = True
+GET_MP4 = False
 VIRAT_CACHE_DIR = "/root/cache/"
         
 def traj_concatable(epsilon, iou_thres, key='trajectory'):
@@ -157,7 +157,7 @@ def query(path, session):
     )(redetect_bounds)
     redetect_bounds = Sort(window=frame_count)(redetect_bounds)
 
-    redetect_fg = VideoCropFrameGroup(LRULocalVideoDecoder(path, cache_size=900), name="crop_redetect_volume")(redetect_bounds)
+    redetect_fg = VideoCropFrameGroup(LRULocalVideoDecoder(path, cache_size=300), name="crop_redetect_volume")(redetect_bounds)
     
     redetect_patches = Flatten(
         flatten_fn=lambda fg: fg.to_image_intervals()
@@ -169,7 +169,7 @@ def query(path, session):
     rekey = 'traj_person'
 
     short_person_trajectories = TrackFromBox(
-        LRULocalVideoDecoder(path, cache_size=900), 
+        LRULocalVideoDecoder(path, cache_size=300), 
         window=detect_step, 
         step=2,
         trajectory_key=rekey,
