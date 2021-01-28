@@ -144,6 +144,9 @@ def query(path, session):
 
     dialted_stopped_cars = Map(dilate_car)(stopped_cars_1)
 
+    # coalesce nearby stopped cars to reduce redundant re-detection
+    redetect_bounds = Coalesce(predicate=iou_at_least(0.1), epsilon=0)(dialted_stopped_cars)
+
     # sample single-frame bounds from redetect_volumnes for object detection
     redetect_bounds = Flatten(
         flatten_fn=lambda i: \
@@ -151,7 +154,7 @@ def query(path, session):
                 Interval(Bounds3D(t1, t1+1, i['x1'], i['x2'], i['y1'], i['y2'])) \
                 for t1 in range(int(i['t1']), int(i['t2']), detect_step) 
             ]
-    )(dialted_stopped_cars)
+    )(redetect_bounds)
     redetect_bounds = Sort(window=frame_count)(redetect_bounds)
 
     redetect_fg = VideoCropFrameGroup(LRULocalVideoDecoder(path, cache_size=900), name="crop_redetect_volume")(redetect_bounds)
@@ -189,7 +192,7 @@ def query(path, session):
     def merge_op_getout(ic, ip):
         new_bounds = ic.bounds.span(ip)
         new_bounds['t1'] = max(0, ip['t1'] - 3*fps) # wind back 3 seconds
-        new_bounds['t2'] = ip['t1']
+        new_bounds['t2'] = min(frame_count, ip['t1'] + fps)
         new_payload = {rekey: ip.payload[rekey]}
         return Interval(new_bounds, new_payload)
 
@@ -202,11 +205,13 @@ def query(path, session):
     # dedup and merge final results
     get_out = Coalesce(predicate=overlaps())(get_out)
 
-    vis_decoder = LRULocalVideoDecoder(path, cache_size=900)
-    raw_fg = VideoCropFrameGroup(vis_decoder, copy_payload=True)(get_out)
-    visualize_fg = VisualizeTrajectoryOnFrameGroup(rekey, name="visualize-person-traj")(raw_fg)
-
-    output = visualize_fg
+    if GET_MP4:
+        vis_decoder = LRULocalVideoDecoder(path, cache_size=900)
+        raw_fg = VideoCropFrameGroup(vis_decoder, copy_payload=True)(get_out)
+        visualize_fg = VisualizeTrajectoryOnFrameGroup(rekey, name="visualize-person-traj")(raw_fg)
+        output = visualize_fg
+    else:
+        output = get_out
 
     output_sub = output.subscribe()
     output.start_thread_recursive()
@@ -215,7 +220,7 @@ def query(path, session):
         if GET_MP4:
             query_result['results'].append((intrvl.bounds.copy(), intrvl.get_mp4()))
         else:
-            query_result['results'].append((intrvl.bounds, b''))
+            query_result['results'].append((intrvl.bounds.copy(), b''))
 
         del intrvl
         gc.collect()
@@ -250,6 +255,7 @@ def main(mode, path=None, result_file="getout_result.csv", get_mp4=True, mp4_dir
             filter_result: STSearchResult = STSearchResult()
             filter_result.ParseFromString(res[OUTPUT_ATTR])
             query_result = pickle.loads(filter_result.query_result)
+            metadata = query_result['metadata']
 
             for seq, (b, mp4) in enumerate(query_result['results']):
                 if len(mp4) > 0:
