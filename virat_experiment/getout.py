@@ -144,9 +144,6 @@ def query(path, session):
 
     dialted_stopped_cars = Map(dilate_car)(stopped_cars_1)
 
-    # coalesce nearby stopped cars to reduce redundant re-detection
-    redetect_bounds = Coalesce(predicate=iou_at_least(0.1), epsilon=0)(dialted_stopped_cars)
-
     # sample single-frame bounds from redetect_volumnes for object detection
     redetect_bounds = Flatten(
         flatten_fn=lambda i: \
@@ -154,7 +151,7 @@ def query(path, session):
                 Interval(Bounds3D(t1, t1+1, i['x1'], i['x2'], i['y1'], i['y2'])) \
                 for t1 in range(int(i['t1']), int(i['t2']), detect_step) 
             ]
-    )(redetect_bounds)
+    )(dialted_stopped_cars)
     redetect_bounds = Sort(window=frame_count)(redetect_bounds)
 
     redetect_fg = VideoCropFrameGroup(LRULocalVideoDecoder(path, cache_size=300), name="crop_redetect_volume")(redetect_bounds)
@@ -248,9 +245,9 @@ def main(mode, path=None, result_file="getout_result.csv", get_mp4=True, mp4_dir
 
         for i, res in enumerate(results):
             # each `res` corresponds to results of a clip_id
-            print(f"=> Result {i}. Time {(time.time()-tic)/60:.1f} min.")
             object_id = res['_ObjectID'].decode()
             clip_id = Path(object_id).stem
+            print(f"=> Result {i}. Time {(time.time()-tic)/60:.1f} min. Clip {clip_id}")
 
             filter_result: STSearchResult = STSearchResult()
             filter_result.ParseFromString(res[OUTPUT_ATTR])
