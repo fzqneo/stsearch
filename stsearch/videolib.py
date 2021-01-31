@@ -23,6 +23,9 @@ GRAY_KEY = '_gray'
 JPEG_KEY = '_jpeg'
 FRAMEGROUP_KEY = '_frames'  # a list of numpy array
 
+class OpenCVKnownIssue(Exception):
+    pass
+
 class ImageInterval(Interval):
 
     def __init__(
@@ -265,8 +268,9 @@ class LocalVideoDecoder(AbstractVideoDecoder):
             self.fps = cap.get(cv2.CV_CAP_PROP_FPS)
             
         self.pos_frame = 0  # frame id of the next read()
-
         self.lock = threading.Lock()
+
+        self.last_valid_frame = (float('-inf'), None) # (int, np.ndarray)
 
     def get_raw_frame(self, frame_id):
         assert frame_id < self.frame_count, f"Frame id {frame_id} out of bound {self.frame_count}" 
@@ -284,7 +288,12 @@ class LocalVideoDecoder(AbstractVideoDecoder):
                     self.cap.set(cv2.CV_CAP_PROP_POS_FRAMES, frame_id)
 
             success, frame = self.cap.read()
-            assert success and frame is not None, f"frame_id={frame_id}, frame_count={self.frame_count}, CV_CAP_PROP_POS_FRAMES={self.cap.get(cv2.CAP_PROP_POS_FRAMES)}"
+            if success and frame is not None:
+                if frame_id > self.last_valid_frame[0]:
+                    self.last_valid_frame = (frame_id, frame)
+            else:
+                logger.warn(f"Insufficient frames. frame_id={frame_id}, frame_count={self.frame_count}, CV_CAP_PROP_POS_FRAMES={self.cap.get(cv2.CAP_PROP_POS_FRAMES)}. Returning the last valid frame {self.last_valid_frame[0]}")
+                frame = self.last_valid_frame[1]
 
         self.pos_frame = frame_id+1
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
