@@ -58,10 +58,13 @@ class ImageInterval(Interval):
 
     @property
     def gray(self):
-        # Can upgrade to functools.cached_property with Python>=3.8
-        if GRAY_KEY not in self.payload:
-            self.payload[GRAY_KEY] = cv2.cvtColor(self.rgb, cv2.COLOR_RGB2GRAY)
-        return self.payload[GRAY_KEY]
+        # # Can upgrade to functools.cached_property with Python>=3.8
+        # if GRAY_KEY not in self.payload:
+        #     self.payload[GRAY_KEY] = cv2.cvtColor(self.rgb, cv2.COLOR_RGB2GRAY)
+        # return self.payload[GRAY_KEY]
+
+        # don't cache
+        return cv2.cvtColor(self.rgb, cv2.COLOR_RGB2GRAY)
 
     @property
     def rgb_height(self):
@@ -73,11 +76,15 @@ class ImageInterval(Interval):
 
     @property
     def jpeg(self):
-        if JPEG_KEY not in self.payload:
-            _, jpg_arr = cv2.imencode('.jpg', cv2.cvtColor(self.rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 100])
-            self.payload[JPEG_KEY] = jpg_arr.tobytes()
+        # if JPEG_KEY not in self.payload:
+        #     _, jpg_arr = cv2.imencode('.jpg', cv2.cvtColor(self.rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 100])
+        #     self.payload[JPEG_KEY] = jpg_arr.tobytes()
 
-        return self.payload[JPEG_KEY]
+        # return self.payload[JPEG_KEY]
+
+        # don't cache
+        _, jpg_arr = cv2.imencode('.jpg', cv2.cvtColor(self.rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 100])
+        return jpg_arr
 
     @staticmethod
     def readfile(path):
@@ -430,3 +437,57 @@ class Crop(Graph):
 
         return Map(map_fn)(instream)
 
+
+class Resize(Graph):
+    def __init__(self, size):
+        super().__init__()
+        self.size = size
+
+    def call(self, instream):
+        def map_fn(ii):
+            assert isinstance(ii, ImageInterval), f"Expect ImageInterval. Got {type(ii)} "
+            old_rgb =ii.rgb
+            H, W = old_rgb.shape[:2]
+
+            if isinstance(self.size, (int, float)):
+                sf = self.size / max(H, W)
+                new_W, new_H = int(sf*W), int(sf*H)
+            else:
+                new_W, new_H = self.size
+
+            new_rgb = cv2.resize(old_rgb, (new_W, new_H))
+
+            new_ii = ii.copy()
+            new_ii.rgb = new_rgb
+
+            return new_ii
+
+        return Map(map_fn)(instream)
+
+
+class Tile(Graph):
+    def __init__(self, tile_x=2, tile_y=2):
+        super().__init__()
+        self.tile_x, self.tile_y = tile_x, tile_y
+
+    def call(self, instream):
+
+        def flatten_fn(ii):
+            assert isinstance(ii, ImageInterval), f"Expect ImageInterval. Got {type(ii)} "
+            return [
+                ImageInterval(
+                    bounds=Bounds3D(
+                        t1=ii['t1'], t2=ii['t2'],
+                        x1 = x_id / self.tile_x,
+                        x2 = (x_id + 1) / self.tile_x,
+                        y1 = y_id / self.tile_y,
+                        y2 = (y_id + 1) / self.tile_y
+                    ),
+                    root=ii
+                )
+                for y_id in range(self.tile_y) for x_id in range(self.tile_x)
+            ]
+        
+        return Flatten(flatten_fn)(instream)
+
+            

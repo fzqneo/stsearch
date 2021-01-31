@@ -77,13 +77,14 @@ class Detection(Graph):
     
 class DetectionVisualize(Graph):
 
-    def __init__(self, targets, confidence=0.9, result_key=DEFAULT_DETECTION_KEY):
+    def __init__(self, targets, confidence=0.9, result_key=DEFAULT_DETECTION_KEY, color=(0, 255, 0)):
         super().__init__()
 
         assert iter(targets)
         self.targets = targets
         self.confidence = confidence
         self.result_key = result_key
+        self.color = color
         
         def map_fn(intrvl):
             try:
@@ -91,7 +92,7 @@ class DetectionVisualize(Graph):
             except KeyError:
                 raise KeyError( f"Cannot find {self.result_key} in input payload. Did you run object detection on the input stream?")
 
-            rgb = intrvl.rgb
+            rgb = np.copy(intrvl.rgb)
             for box, score, class_name in zip(detections['detection_boxes'], detections['detection_scores'], detections['detection_names']):
                 if score < self.confidence:
                     break
@@ -100,10 +101,11 @@ class DetectionVisualize(Graph):
                         top, left, bottom, right = box  # TF return between 0~1
                         H, W = intrvl.rgb.shape[:2]
                         top, left, bottom, right = int(top*H), int(left*W), int(bottom*H), int(right*W) # to pixels
-                        rgb = cv2.rectangle(rgb, (left, top), (right, bottom), (0, 255, 0), 3)
+                        rgb = cv2.rectangle(rgb, (left, top), (right, bottom), self.color, 3)
             
-            intrvl.rgb = rgb
-            return intrvl
+            new_intrvl = intrvl.copy()
+            new_intrvl.rgb = rgb
+            return new_intrvl
 
         self.map_fn = map_fn
 
