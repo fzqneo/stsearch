@@ -2,7 +2,7 @@
 diamond-*-filters.tgz
 diamond-*-filters.tgz.install
 .vscode/
-
+*.csv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

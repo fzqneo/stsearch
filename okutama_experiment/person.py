@@ -32,7 +32,7 @@ logger.setLevel(logging.INFO)
 
 DETECTION_SERVERS = [
     'agra.diamond.cs.cmu.edu',
-    # 'briolette.diamond.cs.cmu.edu',
+    'briolette.diamond.cs.cmu.edu',
     'cullinan.diamond.cs.cmu.edu',
     'dresden.diamond.cs.cmu.edu',
     'indore.diamond.cs.cmu.edu',
@@ -64,12 +64,12 @@ def query(path, session):
     all_frames = VideoToFrames(LocalVideoDecoder(path))()
     sampled_frames = Slice(step=detect_step)(all_frames)
 
-    tiles = Tile(2, 2)(sampled_frames)
+    tiles = Tile(3, 3)(sampled_frames)
 
-    detections = Detection(server_list=DETECTION_SERVERS, parallel=8)(tiles)
-    # frames_with_person = DetectionFilter(targets=['suitcase'], confidence=0.01)(detections)
+    detections = Detection(server_list=DETECTION_SERVERS, parallel=len(DETECTION_SERVERS))(tiles)
+    detections = DetectionFilter(targets=['person'], confidence=0.1)(detections)
     frames_visualized = DetectionVisualize(targets=['person'], confidence=0.3)(detections)
-    frames_visualized = DetectionVisualize(targets=['suitcase'], confidence=0.01, color=(255,0,0))(frames_visualized)
+    frames_visualized = DetectionVisualize(targets=['person'], confidence=0.1, color=(255,0,0), black_list=True)(frames_visualized)
     frames_visualized = Resize(size=800)(frames_visualized)
 
     output = frames_visualized
