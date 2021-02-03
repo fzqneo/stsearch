@@ -33,6 +33,10 @@ RUN wget https://github.com/fzqneo/stsearch/releases/download/20201204/frcnn_cac
     && unzip frcnn_cache.zip \
     && rm frcnn_cache.zip 
 
+RUN wget https://github.com/fzqneo/stsearch/releases/download/20210202/okutama_frcnn_3x3.zip \
+    && unzip okutama_frcnn_3x3.zip \
+    && rm okutama_frcnn_3x3.zip
+
 COPY . /root/
 RUN pip install --no-cache-dir . 
 

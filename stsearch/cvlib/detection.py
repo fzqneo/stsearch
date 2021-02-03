@@ -3,6 +3,7 @@ import io
 import json
 import operator
 from pathlib import Path
+import pickle
 import random
 import requests
 from typing import Iterable, Optional
@@ -12,7 +13,7 @@ import numpy as np
 from logzero import logger
 
 from rekall.bounds import Bounds3D
-from stsearch.op import Filter, Flatten, Graph, Map, Op
+from stsearch.op import Filter, Flatten, FromIterable, Graph, Map, Op
 from stsearch.parallel import ParallelMap
 from stsearch.videolib import ImageInterval
 
@@ -77,7 +78,22 @@ class Detection(Graph):
     
 class DetectionVisualize(Graph):
 
-    def __init__(self, targets, confidence=0.9, result_key=DEFAULT_DETECTION_KEY, color=(0, 255, 0)):
+    def __init__(self, targets=None, confidence=0.9, result_key=DEFAULT_DETECTION_KEY, color=(0, 255, 0), black_list=False):
+        """[summary]
+
+        Args:
+            targets ([type], optional): [description]. Defaults to None.
+            confidence (float, optional): [description]. Defaults to 0.9.
+            result_key ([type], optional): [description]. Defaults to DEFAULT_DETECTION_KEY.
+            color (tuple, optional): [description]. Defaults to (0, 255, 0).
+            black_list (bool, optional): If True, `targets` is interprested as a black list. Classes NOT in targets will be visualized. Defaults to False.
+
+        Raises:
+            KeyError: [description]
+
+        Returns:
+            [type]: [description]
+        """
         super().__init__()
 
         assert iter(targets)
@@ -85,6 +101,7 @@ class DetectionVisualize(Graph):
         self.confidence = confidence
         self.result_key = result_key
         self.color = color
+        self.black_list = black_list
         
         def map_fn(intrvl):
             try:
@@ -96,12 +113,12 @@ class DetectionVisualize(Graph):
             for box, score, class_name in zip(detections['detection_boxes'], detections['detection_scores'], detections['detection_names']):
                 if score < self.confidence:
                     break
-                for t in self.targets:
-                    if t in class_name:
-                        top, left, bottom, right = box  # TF return between 0~1
-                        H, W = intrvl.rgb.shape[:2]
-                        top, left, bottom, right = int(top*H), int(left*W), int(bottom*H), int(right*W) # to pixels
-                        rgb = cv2.rectangle(rgb, (left, top), (right, bottom), self.color, 3)
+
+                if (not self.black_list and class_name in self.targets) or (self.black_list and class_name not in self.targets):
+                    top, left, bottom, right = box  # TF return between 0~1
+                    H, W = intrvl.rgb.shape[:2]
+                    top, left, bottom, right = int(top*H), int(left*W), int(bottom*H), int(right*W) # to pixels
+                    rgb = cv2.rectangle(rgb, (left, top), (right, bottom), self.color, 3)
             
             new_intrvl = intrvl.copy()
             new_intrvl.rgb = rgb
@@ -144,13 +161,14 @@ class DetectionFilter(Graph):
 
 class DetectionFilterFlatten(Graph):
 
-    def __init__(self, targets, confidence=0.9, result_key=DEFAULT_DETECTION_KEY, name=None):
+    def __init__(self, targets, confidence=0.9, result_key=DEFAULT_DETECTION_KEY, name=None, black_list=False):
         super().__init__()
         assert iter(targets)
         self.targets = targets
         self.confidence = confidence
         self.result_key = result_key
         self.name = name or self.__class__.__name__
+        self.black_list = black_list
 
     def call(self, instream):
 
@@ -161,30 +179,27 @@ class DetectionFilterFlatten(Graph):
             except KeyError:
                 raise KeyError( f"Cannot find {self.result_key} in input payload. Did you run object detection on the input stream?")
 
-            has_result = False
             for box, score, class_name in zip(detections['detection_boxes'], detections['detection_scores'], detections['detection_names']):
                 if score < self.confidence:
                     break
-                for t in self.targets:
-                    if t in class_name:
-                        has_result = True
-                        # create new patch
-                        top, left, bottom, right = box  # TF return between 0~1
-                        # the following arithmetic should be correct even if `intrvl` is not full frame.
-                        new_bounds = Bounds3D(
-                            intrvl['t1'], intrvl['t2'],
-                            intrvl['x1'] + intrvl.bounds.width() * left,
-                            intrvl['x1'] + intrvl.bounds.width() * right,
-                            intrvl['y1'] + intrvl.bounds.height() * top,
-                            intrvl['y1'] + intrvl.bounds.height() * bottom
-                        )
-                        new_patch = ImageInterval(new_bounds, root=intrvl.root)
-                        rv.append(new_patch)
+
+                if (not self.black_list and class_name in self.targets) or (self.black_list and class_name not in self.targets):
+                    # create new patch
+                    top, left, bottom, right = box  # TF return between 0~1
+                    # the following arithmetic should be correct even if `intrvl` is not full frame.
+                    new_bounds = Bounds3D(
+                        intrvl['t1'], intrvl['t2'],
+                        intrvl['x1'] + intrvl.bounds.width() * left,
+                        intrvl['x1'] + intrvl.bounds.width() * right,
+                        intrvl['y1'] + intrvl.bounds.height() * top,
+                        intrvl['y1'] + intrvl.bounds.height() * bottom
+                    )
+                    new_patch = ImageInterval(new_bounds, root=intrvl.root)
+                    rv.append(new_patch)
             rv.sort(key=lambda i: i.bounds)
             return rv
 
         return Flatten(flatten_fn, name=self.name)(instream)
-
 
 
 class CachedVIRATDetection(Graph):
@@ -213,3 +228,24 @@ class CachedVIRATDetection(Graph):
             return intrvl
 
         return Map(map_fn)(instream)
+
+
+class CachedOkutamaDetection(Graph):
+    def __init__(self, path, cache_dir):
+        # load cache file and sort by t1, so that we can direct access by indexing
+        h = hashlib.md5()
+        with open(path, 'rb') as f:
+            h.update(f.read())
+        digest = str(h.hexdigest())
+        cache_path = str(Path(cache_dir) / (digest+'.pkl'))
+        with open(cache_path, 'rb') as f:
+            L = pickle.load(f)
+
+        self.L = L
+
+    def call(self):
+        def map_fn(intrvl):
+            return ImageInterval(intrvl.bounds.copy(), intrvl.payload)
+        return Map(map_fn)(FromIterable(self.L)())
+
+        

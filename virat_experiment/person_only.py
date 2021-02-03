@@ -41,9 +41,6 @@ DIAMOND_SERVERS = [
     'transvaal.diamond.cs.cmu.edu'
     ]
 DETECTION_SERVERS = [f"{h}:{p}" for h,p in itertools.product(DIAMOND_SERVERS, [5000, 5001])]
-
-# DETECTION_SERVERS = ["172.17.0.1:5000", "172.17.0.1:5001"]
-
         
 def query(path, session):
     cv2.setNumThreads(8)

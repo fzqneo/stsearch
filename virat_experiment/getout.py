@@ -277,9 +277,9 @@ def main(mode, path=None, result_file="getout_result.csv", get_mp4=True, mp4_dir
                     }
                 )
 
+            logger.info(f"# results = {len(query_result['results'])}")
             del query_result['results']
             logger.info(query_result)
-            logger.info(f"# results = {seq}")
 
             pd.DataFrame(save_results).to_csv(result_file)
 

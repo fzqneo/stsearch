@@ -3,5 +3,6 @@ rekall/*
 test/*
 research/*
 virat_experiment/*
+okutama_experiment/*
 !test/*.py
 .git/*
