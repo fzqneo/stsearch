@@ -45,7 +45,7 @@ DETECTION_SERVERS = [
 DETECTION_SERVERS = [f"{h}:{p}" for h,p in itertools.product(DETECTION_SERVERS, [5000, 5001])]
 
 OKUTAMA_CACHE_DIR = "/root/okutama_cache/"
-GET_MP4 = True
+GET_MP4 = False
 
 def query(path, session):
     cv2.setNumThreads(8)
@@ -66,10 +66,10 @@ def query(path, session):
     detect_step = 30
     
     person = DetectionFilterFlatten(['person'], 0.3)(CachedOkutamaDetection(path, OKUTAMA_CACHE_DIR)())
-    non_person_object = DetectionFilterFlatten(['person'], 0.1, black_list=True)(CachedOkutamaDetection(path, OKUTAMA_CACHE_DIR)())
+    non_person_object = DetectionFilterFlatten(['person'], 0.3, black_list=True)(CachedOkutamaDetection(path, OKUTAMA_CACHE_DIR)())
 
     def is_pushing(i_person, i_object):
-        return _iou(i_person, i_object) > 1e-3 and _area(i_person) < 10*_area(i_object)
+        return i_person['t1'] == i_object['t1'] and _iou(i_person, i_object) > 1e-3 and _area(i_object) < _area(i_person)*3
 
     def loading_merge_op(i_person, i_object):
         new_bounds = i_object.bounds.span(i_person)
@@ -83,6 +83,7 @@ def query(path, session):
 
     # dedup and merge final results
     loading_event = Coalesce(epsilon=detect_step)(pushing_candidate)
+    loading_event = Filter(lambda i: i.bounds.length()>2*30)(loading_event)
 
     if GET_MP4:
         vis_decoder = LRULocalVideoDecoder(path, cache_size=300)
