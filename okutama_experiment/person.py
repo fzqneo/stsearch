@@ -69,7 +69,7 @@ def query(path, session):
     detections = Detection(server_list=DETECTION_SERVERS, parallel=len(DETECTION_SERVERS))(tiles)
     detections = DetectionFilter(targets=['person'], confidence=0.1)(detections)
     frames_visualized = DetectionVisualize(targets=['person'], confidence=0.3)(detections)
-    frames_visualized = DetectionVisualize(targets=['person'], confidence=0.1, color=(255,0,0), black_list=True)(frames_visualized)
+    # frames_visualized = DetectionVisualize(targets=['person'], confidence=0.1, color=(255,0,0), black_list=True)(frames_visualized)
     frames_visualized = Resize(size=800)(frames_visualized)
 
     output = frames_visualized

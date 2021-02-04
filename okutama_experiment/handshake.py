@@ -47,6 +47,7 @@ DETECTION_SERVERS = [f"{h}:{p}" for h,p in itertools.product(DETECTION_SERVERS, 
 OKUTAMA_CACHE_DIR = "/root/okutama_cache/"
 GET_MP4 = False
 
+
 def query(path, session):
     cv2.setNumThreads(8)
     
@@ -65,32 +66,33 @@ def query(path, session):
 
     detect_step = 30
     
-    person = DetectionFilterFlatten(['person'], 0.3)(CachedOkutamaDetection(path, OKUTAMA_CACHE_DIR)())
-    non_person_object = DetectionFilterFlatten(['person'], 0.3, black_list=True)(CachedOkutamaDetection(path, OKUTAMA_CACHE_DIR)())
+    person_1 = DetectionFilterFlatten(['person'], 0.3)(CachedOkutamaDetection(path, OKUTAMA_CACHE_DIR)())
+    person_2 = DetectionFilterFlatten(['person'], 0.3)(CachedOkutamaDetection(path, OKUTAMA_CACHE_DIR)())
 
-    def is_pushing(i_person, i_object):
-        return i_person['t1'] == i_object['t1'] and _iou(i_person, i_object) > 1e-3 and _area(i_object) < _area(i_person)*3
+    def is_handshake(i1: Interval, i2: Interval) -> bool:
+        dx, dy = centroid(i1) - centroid(i2)
+        return i1['t1'] == i2['t1'] and i1['x1'] < i2['x1'] and dx <= 1.5*i1.bounds.width() and dy <= 1.5*i1.bounds.height()
 
-    def merge_op(i_person, i_object):
-        new_bounds = i_object.bounds.span(i_person)
+    def merge_op(i1, i2):
+        new_bounds = i2.bounds.span(i1)
+        new_bounds['t2'] = new_bounds['t2'] 
         return Interval(new_bounds)
 
-    pushing_candidate = Join(
-        predicate=is_pushing,
+    handshake_event = Join(
+        predicate=is_handshake,
         merge_op=merge_op,
-        window=30
-    )(person, non_person_object)
+        window=detect_step
+    )(person_1, person_2)
 
     # dedup and merge final results
-    pushing_event = Coalesce(epsilon=detect_step)(pushing_candidate)
-    pushing_event = Filter(lambda i: i.bounds.length()>2*30)(pushing_event)
+    handshake_event = Coalesce(predicate=iou_at_least(.001),epsilon=detect_step)(handshake_event)
 
     if GET_MP4:
         vis_decoder = LRULocalVideoDecoder(path, cache_size=300)
-        raw_fg = VideoCropFrameGroup(vis_decoder, copy_payload=True)(pushing_event)
+        raw_fg = VideoCropFrameGroup(vis_decoder, copy_payload=True)(handshake_event)
         output = raw_fg
     else:
-        output = pushing_event
+        output = handshake_event
 
     output_sub = output.subscribe()
     output.start_thread_recursive()
@@ -107,7 +109,7 @@ def query(path, session):
     return query_result
 
 
-def main(mode, path=None, result_file="pushing_result.csv", get_mp4=True, mp4_dir="pushing_mp4"):
+def main(mode, path=None, result_file="handshake_result.csv", get_mp4=False, mp4_dir="handshake_mp4"):
     assert mode in ('remote', 'local')
 
     if mode == 'remote':
@@ -167,8 +169,11 @@ def main(mode, path=None, result_file="pushing_result.csv", get_mp4=True, mp4_di
 
     elif mode == 'local':
         from pathlib import Path
-
         assert path is not None
+        if get_mp4:
+            global GET_MP4
+            GET_MP4 = True
+
         global OKUTAMA_CACHE_DIR
         OKUTAMA_CACHE_DIR = "/home/zf/video-analytics/stsearch/okutama_experiment/okutama_cache"
         query_result = query(path, session=None)
