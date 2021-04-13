@@ -1,3 +1,5 @@
+import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -40,6 +42,7 @@ def load_summary():
 
 
 def parse_event_list(clip_id, event_type) -> pd.DataFrame:
+    # compress each event instance into a single row
     try:
         df = load_events(clip_id)
     except FileNotFoundError:
@@ -77,7 +80,7 @@ def parse_all_event_list(event_type) -> pd.DataFrame:
     return pd.concat(all_df, ignore_index=True)
 
 
-def parse_result(result_file="getoutcar.csv"):
+def parse_result(result_file):
     df = pd.read_csv(result_file, index_col=0)
     # convert relative coord to pixel coord
     df['x1'] = df['x1'] * df['width']
@@ -86,5 +89,62 @@ def parse_result(result_file="getoutcar.csv"):
     df['y2'] = df['y2'] * df['height']
     return df
 
+
+class OBJECTTYPE(object):
+    PERSON=1
+    CAR=2
+    VEHICLE=3
+    OBJECT=4
+    BIKE=5
+
+
+def load_objects(clip_id):
+    columns = [
+        'track_id', 'duration', 'current_frame', 'x1', 'y1', 'w', 'h', 'object_type'
+    ]
+    path = Path(VIRAT_ROOT) / "annotations" / f"{clip_id}.viratdata.objects.txt"
+    try:
+        df = pd.read_csv(path, sep=' ', names=columns, index_col=False)
+        df['x2'] = df['x1'] + df['w']
+        df['y2'] = df['y1'] + df['h']
+        return df
+    except FileNotFoundError:
+        print(f"No object file for {clip_id}. Returning empty DataFrame")
+        return pd.DataFrame(columns=columns)
+
+
+def convert_gt_and_det_for_metrics(gt:str, det:str, cache_dir="cache", classes=["car", "bus", "truck"]):
+    for cache_file in Path(cache_dir).glob("*.json"):
+        with open(cache_file, 'rt') as f:
+            cache_result = json.load(f)
+
+        clip_id = cache_result['clip_id']
+
+        print(f"Found {cache_file}. Clip id={clip_id}")
+
+        fps = cache_result['fps']
+        W, H = cache_result['width'], cache_result['height']
+
+        frame_ids = []  # frame ids that have been detected
+
+        # write the det file
+        for frame_result in cache_result['detection']:
+            frame_id = frame_result['t1']
+            frame_ids.append(frame_id)
+            D = frame_result['detection']
+            with open(Path(det)/f"{clip_id}_{frame_id}.txt", "wt") as of:
+                for class_name, score, (top, left, bottom, right) in zip(D['detection_names'], D['detection_scores'], D['detection_boxes']):
+                    if class_name in classes and score > 0.:
+                        of.write(f"vehicle {score} {left*W} {top*H} {right*W} {bottom*H}\n")
+
+        # write the groundtruth file using frame_ids
+        df = load_objects(clip_id)
+        for frame_id in frame_ids:
+            with open(Path(gt)/f"{clip_id}_{frame_id}.txt", "wt") as of:
+                for _, row in df[df['current_frame']==frame_id].iterrows():
+                    if row['object_type'] in [OBJECTTYPE.CAR, OBJECTTYPE.VEHICLE]:
+                        of.write(f"vehicle {row['x1']} {row['y1']} {row['x2']} {row['y2']}\n")
+                
+                
 if __name__ == "__main__":
     fire.Fire()    
