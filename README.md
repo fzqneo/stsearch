@@ -49,3 +49,11 @@ Interleaved tracking and LRU decoder time (second) only on a workload:
 | 16                | 64           | 53 | 22 | 8.9 |
 
 2. `opencv-contribe-python` from PyPI is compiled with pthread rather than OpenMP, so `OMP_NUM_THREADS` seems to have no effect.
+
+
+## X-Y Coordinates
+
+x1 = xmin = left
+x2 = xmax = right
+y1 = ymin = top
+y2 = ymax = bottom

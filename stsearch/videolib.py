@@ -442,6 +442,7 @@ class Crop(Graph):
             crop_ii = ImageInterval(
                 bounds=rekall.Bounds3D(ii['t1'], ii['t2'], self.x1, self.x2, self.y1, self.y2),
                 root=ii.root)
+
             return crop_ii
 
         return Map(map_fn)(instream)

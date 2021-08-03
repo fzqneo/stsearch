@@ -3,6 +3,7 @@ from pathlib import Path
 
 from logzero import logger
 
+import stsearch
 from stsearch.interval import *
 from stsearch.op import *
 from stsearch.videolib import *
@@ -13,6 +14,8 @@ OUTPUT_DIR = Path(__file__).stem + "_output"
 if __name__ == "__main__":
     
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    stsearch.exc = None
 
     all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
     sampled_frames = Slice(start=0, step=30, end=900)(all_frames)
@@ -26,5 +29,8 @@ if __name__ == "__main__":
         output_name = f"{OUTPUT_DIR}/{k}.jpg"
         ii.savefile(output_name)
         logger.debug(f"saved {output_name}")
+
+    if stsearch.exc:
+        raise stsearch.exc
 
     logger.info("You should find 30 .jpg files sampled from 900 timesteps, each cropped at center.")

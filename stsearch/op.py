@@ -11,6 +11,7 @@ import rekall
 from rekall.bounds import Bounds, Bounds3D
 from rekall.predicates import *
 
+import stsearch
 from stsearch.interval import Interval
 from stsearch.interval_stream import IntervalStream, IntervalStreamSubscriber
 
@@ -99,9 +100,14 @@ class Op(object):
         raise NotImplementedError
 
     def loop_execute(self):
-        while self.execute():
-            pass
-        self.publish(None)
+        try:
+            while self.execute():
+                pass
+        except Exception as e:
+            stsearch.exc = e
+            logger.exception(e)
+        finally:
+            self.publish(None)
         logger.info(f"{self.name} terminating loop.")
         return
 
