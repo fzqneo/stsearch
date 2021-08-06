@@ -10,7 +10,7 @@ if __name__ == "__main__":
           license='Apache 2.0',
           packages=find_packages(include=['stsearch', 'stsearch.*']),
           install_requires=['rekallpy==0.3.2', 'logzero', 'numpy', 'opencv-contrib-python', 'python-constraint', 'tqdm', 'cloudpickle',
-                            'urllib3', 'requests'],
+                            'urllib3', 'requests', 'filterpy', 'scikit-learn', 'scikit-image'],
           setup_requires=['pytest-runner'],
           tests_require=['pytest'],
           zip_safe=False)

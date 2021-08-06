@@ -114,6 +114,7 @@ def load_objects(clip_id):
 
 
 def convert_gt_and_det_for_metrics(gt:str, det:str, cache_dir="cache", classes=["car", "bus", "truck"]):
+    # convert predictions and gt into files used by https://github.com/rafaelpadilla/Object-Detection-Metrics
     for cache_file in Path(cache_dir).glob("*.json"):
         with open(cache_file, 'rt') as f:
             cache_result = json.load(f)

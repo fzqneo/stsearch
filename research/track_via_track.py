@@ -18,21 +18,26 @@ from utils import VisualizeTrajectoryOnFrameGroup
 
 cv2.setNumThreads(4)
 
-INPUT_NAME = "example.mp4"
+INPUT_NAME = "VIRAT_getin.mp4"
+# INPUT_NAME = "example.mp4"
 OUTPUT_DIR = Path(__file__).stem + "_output"
 
 if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    fps = 15
-    detect_every = 8
+    decoder = LocalVideoDecoder(INPUT_NAME)
+    frame_count, fps = decoder.frame_count, np.round(decoder.fps)
+    logger.info(f"Video info: frame_count {decoder.frame_count}, fps {decoder.fps}, raw_width {decoder.raw_width}, raw_height {decoder.raw_height}")
+    del decoder
+
+    detect_step = int(fps)
     
     all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
-    sampled_frames = Slice(step=detect_every)(all_frames)
+    sampled_frames = Slice(step=detect_step)(all_frames)
     detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000, parallel=2)(sampled_frames)
-    crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
+    crop_persons = DetectionFilterFlatten(['person'], 0.3)(detections)
 
-    short_trajectories = TrackFromBox(LRULocalVideoDecoder(INPUT_NAME), detect_every, parallel_workers=24)(crop_persons)
+    short_trajectories = TrackFromBox(LRULocalVideoDecoder(INPUT_NAME), detect_step, parallel_workers=24)(crop_persons)
 
     def trajectory_merge_predicate(i1, i2):
         return meets_before(3)(i1, i2) \

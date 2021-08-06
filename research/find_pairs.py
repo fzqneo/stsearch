@@ -22,17 +22,19 @@ from utils import VisualizeTrajectoryOnFrameGroup
 logger.setLevel(logging.INFO)
 cv2.setNumThreads(4)
 
-INPUT_NAME = "example.mp4"
+# INPUT_NAME = "example.mp4"
+INPUT_NAME = "VIRAT_getin.mp4"
+
 OUTPUT_DIR = Path(__file__).stem + "_output"
 
-def is_pair(corrcoef=.9, trajectory_key='trajectory'):
+def is_pair(corrcoef=.5, trajectory_key='trajectory'):
 
     def new_pred(i1: Interval, i2: Interval) -> bool:
         assert trajectory_key in i1.payload
         assert trajectory_key in i2.payload
 
         if not id(i1) < id(i2) \
-            or not same_time(75)(i1, i2) \
+            or not same_time(fps*10)(i1, i2) \
             or not iou_at_least(0.5)(i1, i2):
             return False
 
@@ -69,24 +71,28 @@ def pair_merge_op(i1: Interval, i2: Interval) -> Interval:
 if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    fps = 15
-    detect_every = 8
-    
+    decoder = LocalVideoDecoder(INPUT_NAME)
+    frame_count, fps = decoder.frame_count, int(np.round(decoder.fps))
+    logger.info(f"Video info: frame_count {decoder.frame_count}, fps {decoder.fps}, raw_width {decoder.raw_width}, raw_height {decoder.raw_height}")
+    del decoder
+
+    detect_step = 15
+
     all_frames = VideoToFrames(LocalVideoDecoder(INPUT_NAME))()
-    sampled_frames = Slice(step=detect_every)(all_frames)
+    sampled_frames = Slice(step=detect_step)(all_frames)
     detections = Detection('cloudlet031.elijah.cs.cmu.edu', 5000, parallel=3)(sampled_frames)
     crop_persons = DetectionFilterFlatten(['person'], 0.5)(detections)
 
     track_trajectories = TrackFromBox(
         LRULocalVideoDecoder(INPUT_NAME, cache_size=600), 
-        detect_every,
+        detect_step,
         name="track_person",
         parallel_workers=32
     )(crop_persons)
 
     def trajectory_merge_predicate(i1, i2):
-        return meets_before(5)(i1, i2) \
-            and iou_at_least(0.3)(i1.payload['trajectory'][-1], i2.payload['trajectory'][0])
+        return meets_before(detect_step*2)(i1, i2) \
+            and iou_at_least(0.1)(i1.payload['trajectory'][-1], i2.payload['trajectory'][0])
 
     def trajectory_payload_merge_op(p1, p2):
         logger.debug(f"Merging two trajectories of lengths {len(p1['trajectory'])} and {len(p2['trajectory'])}")

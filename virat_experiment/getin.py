@@ -42,7 +42,7 @@ DIAMOND_SERVERS = [
     ]
 DETECTION_SERVERS = [f"{h}:{p}" for h,p in itertools.product(DIAMOND_SERVERS, [5000, 5001])]
 
-GET_MP4 = False
+GET_MP4 = True
 VIRAT_CACHE_DIR = "/root/cache/"
         
 def traj_concatable(epsilon, iou_thres, key='trajectory'):
@@ -205,8 +205,8 @@ def query(path, session):
     if GET_MP4:
         vis_decoder = LRULocalVideoDecoder(path, cache_size=900)
         raw_fg = VideoCropFrameGroup(vis_decoder, copy_payload=True)(get_out)
-        visualize_fg = VisualizeTrajectoryOnFrameGroup(rekey, name="visualize-person-traj")(raw_fg)
-        output = visualize_fg
+        # visualize_fg = VisualizeTrajectoryOnFrameGroup(rekey, name="visualize-person-traj")(raw_fg)
+        output = raw_fg
     else:
         output = get_out
 
