@@ -56,9 +56,8 @@ class Detection(Graph):
                     break
                 except Exception as e:
                     logger.exception(e)
-                    if max_try > 0:
-                        max_try -= 1
-                    else:
+                    max_try -= 1
+                    if max_try <= 0:
                         raise
 
             result = r.json()
